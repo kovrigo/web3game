@@ -447,6 +447,7 @@ if (import.meta.main) {
   const app = createApp({ db, env });
   const server = Bun.serve({
     port: Number(env.PORT),
+    hostname: env.HOST,
     development: env.DEV_LOGIN === "1",
     maxRequestBodySize: 64 * 1024,
     routes: app.routes,
