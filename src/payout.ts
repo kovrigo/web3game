@@ -53,5 +53,3 @@ export function formatEth(wei: bigint, digits = 6) {
   const frac = (w % 10n ** 18n).toString().padStart(18, "0").slice(0, digits).replace(/0+$/, "");
   return `${neg ? "-" : ""}${whole}${frac ? `.${frac}` : ""}`;
 }
-
-export const usdToEth = (usd: number, rate: number) => (rate > 0 ? usd / rate : null);

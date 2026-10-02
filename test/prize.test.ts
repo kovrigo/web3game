@@ -115,6 +115,12 @@ test("winner signs country and address with the sign-in wallet", async () => {
   P.seasonTick(db, END + 60_000);
   const other = privateKeyToAccount(generatePrivateKey());
   await expect(confirmWith(other, id!, acct.address, END + DAY_MS)).rejects.toThrow("The signature does not match your wallet.");
+  // A signature over one address does not confirm another.
+  const signed = await acct.signMessage({ message: payoutMessage({ seasonId: S().id, playerId: id!, name: "p1", country: "Portugal", address: acct.address }) });
+  await expect(P.confirmPrize(db, S(), id!, "Portugal", other.address, signed, END + DAY_MS)).rejects.toThrow("does not match");
+  await expect(P.confirmPrize(db, S(), id!, "1", acct.address, signed, END + DAY_MS)).rejects.toThrow("Enter your country.");
+  await expect(P.confirmPrize(db, S(), id!, "Portugal", "0x123", signed, END + DAY_MS)).rejects.toThrow("not valid");
+  await expect(confirmWith(acct, id!, acct.address, END + 8 * DAY_MS)).rejects.toThrow("time to confirm has passed");
   await confirmWith(acct, id!, acct.address, END + DAY_MS);
   expect(P.myPrize(db, S(), id!)).toMatchObject({ status: "confirmed", country: "Portugal", address: acct.address });
   await expect(confirmWith(acct, id!, acct.address, END + DAY_MS)).rejects.toThrow("already confirmed");
@@ -147,6 +153,8 @@ test("publish, objections, payout links, paid, next season", async () => {
   expect(() => P.startNextSeason(db, "bo", S(), t + DAY_MS, t)).toThrow("Pay every prize");
   P.recordPayout(db, "bo", S(), w1!.id, hash, t);
   expect(() => P.setRate(db, "bo", S(), 3000, t)).toThrow("rate is fixed");
+  expect(() => P.recordPayout(db, "bo", S(), w2!.id, hash.toUpperCase().replace("0X", "0x"), t)).toThrow("already recorded for another prize");
+  expect(() => P.teamCheck(db, "ana", S(), w1!.id, "excluded", "Late finding.", t)).toThrow("already paid");
   P.recordPayout(db, "bo", S(), w2!.id, `0x${"cd".repeat(32)}`, t);
   expect(phaseOf(S(), t)).toBe("paid");
   expect(P.myPrize(db, S(), a!)).toMatchObject({ status: "paid", txHash: hash, eth: 700 / 3200 });
@@ -155,6 +163,9 @@ test("publish, objections, payout links, paid, next season", async () => {
   P.startNextSeason(db, "bo", S(), t + DAY_MS, t);
   expect(S().id).toBe(2);
   expect(getPlayer(db, a!)!.wave_points).toBe(0);
+  // Last season's prize and payout links stay visible during the next season.
+  expect(P.prizeSeason(db)!.id).toBe(1);
+  expect(P.myPrize(db, P.prizeSeason(db)!, a!)).toMatchObject({ status: "paid", txHash: hash });
   expect(db.query("SELECT item_id FROM gear WHERE player_id = ?").get(a!)).toEqual({ item_id: 36 });
   const log = db.query("SELECT admin, action FROM admin_log ORDER BY id").all() as { action: string }[];
   expect(log.map((l) => l.action)).toContain("next-season");

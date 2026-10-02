@@ -99,6 +99,17 @@ DROP TABLE season_marks;
 CREATE TABLE outbox (id INTEGER PRIMARY KEY, season_id INTEGER NOT NULL, player_id INTEGER NOT NULL, to_email TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', created_at INTEGER NOT NULL, sent_at INTEGER);
 `;
 
+// Version 3: indexes for the boards, the team queue and the winner list; one prize per transaction.
+const INDEXES = `
+CREATE INDEX players_referrer ON players(referrer_id);
+CREATE INDEX signals_ip ON signals(ip_hash);
+CREATE INDEX signals_device ON signals(device);
+CREATE INDEX corrections_season ON corrections(season_id, player_id);
+CREATE INDEX winners_season ON winners(season_id, player_id);
+CREATE UNIQUE INDEX winners_tx ON winners(tx_hash) WHERE tx_hash IS NOT NULL;
+CREATE INDEX waiting_player ON waiting_chests(player_id);
+`;
+
 export function openDb(path: string): Database {
   const db = new Database(path, { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL");
@@ -108,7 +119,8 @@ export function openDb(path: string): Database {
   db.transaction(() => {
     if (v < 1) db.run(SCHEMA);
     if (v < 2) db.run(SEASON_END);
-    db.run("PRAGMA user_version = 2");
+    if (v < 3) db.run(INDEXES);
+    db.run("PRAGMA user_version = 3");
   })();
   return db;
 }

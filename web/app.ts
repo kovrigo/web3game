@@ -399,7 +399,7 @@ function chestsTab() {
   const live = s.season.phase === "live" || s.season.phase === "final_day";
   const waiting: string[] = [];
   if (live && !s.chests.dailyOpen && s.today.commit) waiting.push(`<div class="list-row"><span><b>Daily chest</b><br><span class="small">Streak day ${Math.min(7, s.streak.value + 1)}</span></span><button class="btn btn-primary" style="width:auto" data-act="open" data-kind="daily" data-mut>Open</button></div>`);
-  for (const c of s.chests.waiting) waiting.push(`<div class="list-row"><span><b>Rare chest</b><br><span class="small">Guarantee: rare or better</span></span><button class="btn btn-primary" style="width:auto" data-act="open" data-kind="guaranteed" data-mut>Open</button></div>`);
+  for (const _ of s.chests.waiting) waiting.push(`<div class="list-row"><span><b>Rare chest</b><br><span class="small">Guarantee: rare or better</span></span><button class="btn btn-primary" style="width:auto" data-act="open" data-kind="guaranteed" data-mut>Open</button></div>`);
   const rolls = ui.rolls;
   return `<section class="panel">
       <div class="head"><h2 class="title">Chests</h2><a class="ghost" href="#/odds">Odds</a></div>
@@ -421,6 +421,7 @@ function seasonTab() {
   const ended = phase === "ended" ? alertBox("info", "Season ended.", `Checking winners until ${fmtDayShort((sz?.end ?? 0) + 7 * DAY)}.`)
     : phase === "published" ? `${alertBox("info", "Winners published.", `Objections until ${fmtDayShort(sz!.objectionsUntil!)}.`)}<a class="btn btn-secondary" href="#/winners">See winners</a>`
     : phase === "paid" ? `${alertBox("ok", "Prizes paid.", "Every winner has a transaction link.")}<a class="btn btn-secondary" href="#/winners">See winners</a>`
+    : (sz?.id ?? 1) > 1 ? `<a class="btn btn-secondary" href="#/winners">Last season's winners</a>`
     : "";
   return `${ended}
     <div class="row-actions" role="group" aria-label="Table">
@@ -704,6 +705,7 @@ function prizeBanner(p: Prize | null) {
   if (p.status === "excluded") return alertBox("error", "Not on the winners list.", p.reason ?? "");
   if (p.status === "expired") return alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`);
   if (p.status === "moved") return "";
+  if (p.seasonId !== ui.season?.id && p.status !== "paid") return ""; // last season's prize: only a paid one stays, for the transfer
   const line = p.status === "waiting" ? `Confirm your country and payout address by ${fmtDay(p.deadline)}.`
     : p.status === "paid" ? "Paid. You can transfer it now." : "Confirmed. Payout comes on one day for all winners.";
   return `<section class="panel"><div class="head"><h2 class="title">You won a prize</h2><span class="label">${esc(boardName(p.board))} · ${p.place}</span></div>

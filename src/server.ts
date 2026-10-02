@@ -47,6 +47,10 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
   const dev = env.DEV_LOGIN === "1";
   const mock = dev && env.MOCK_CHAIN === "1";
   const S = () => currentSeason(db)!;
+  const prize = (id: number) => {
+    const s = P.prizeSeason(db);
+    return s ? P.myPrize(db, s, id) : null;
+  };
   const exchanges = (env.EXCHANGES ?? "").split(",").filter(Boolean).map((e) => {
     const [name, url] = e.split("|");
     return { name: name!.trim(), url: url?.trim() ?? null };
@@ -186,7 +190,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         ensureDays(db, t);
         visit(db, id, t, S(), typeof b.seed === "string" ? b.seed : undefined);
         if (typeof b.device === "string") recordSignal(db, id, ipHash(salt, ip(req)), b.device, t);
-        return { ...buildState(db, id, t, S()), prize: P.myPrize(db, S(), id) };
+        return { ...buildState(db, id, t, S()), prize: prize(id) };
       }),
     },
 
@@ -199,7 +203,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         const t = now();
         const r = openChest(db, id, kind, t, S());
         dropBoardCache();
-        return { roll: rollView(db, S(), r), state: { ...buildState(db, id, t, S()), prize: P.myPrize(db, S(), id) } };
+        return { roll: rollView(db, S(), r), state: { ...buildState(db, id, t, S()), prize: prize(id) } };
       }),
     },
 
@@ -334,7 +338,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       return new Response(new Uint8Array(png), { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
     },
 
-    "/api/prize": h((req) => P.myPrize(db, S(), named(req))),
+    "/api/prize": h((req) => prize(named(req))),
     "/api/prize/confirm": {
       POST: h(async (req) => {
         const id = named(req);
@@ -343,7 +347,10 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         return P.myPrize(db, S(), id);
       }),
     },
-    "/api/winners": h(() => P.publicWinners(db, S())),
+    "/api/winners": h(() => {
+      const s = P.prizeSeason(db);
+      return s ? P.publicWinners(db, s) : null;
+    }),
 
     // Mock chain, test server only.
     "/api/dev/chain": {

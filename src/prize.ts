@@ -7,6 +7,7 @@ import type { Database } from "bun:sqlite";
 import { getAddress, isAddress, verifyMessage } from "viem";
 import { PRIZES, SEASON_DAYS } from "./config";
 import { currentSeason, DAY_MS, GameError, getPlayer, tick, type Season } from "./game";
+import { log } from "./admin";
 import { assignPrizes, COUNTRY_RE, payoutMessage, type Board } from "./payout";
 import { boards, dropBoardCache } from "./social";
 
@@ -22,8 +23,9 @@ export type Winner = {
   sanctions_ok: number; tx_hash: string | null; replaced_at: number | null; created_at: number;
 };
 
-const log = (db: Database, admin: string, action: string, payload: unknown, now: number) =>
-  db.query("INSERT INTO admin_log (admin, action, payload, at) VALUES (?, ?, ?, ?)").run(admin, action, JSON.stringify(payload), now);
+// The season whose prizes the game shows: the current one once it ended, else the one before.
+export const prizeSeason = (db: Database) =>
+  db.query<Season, []>("SELECT * FROM seasons WHERE snapshot_at IS NOT NULL ORDER BY id DESC LIMIT 1").get();
 
 export const activeWinners = (db: Database, season: Season) =>
   db.query<Winner, [number]>("SELECT * FROM winners WHERE season_id = ? AND replaced_at IS NULL ORDER BY board DESC, place").all(season.id);
@@ -40,7 +42,8 @@ export function seasonTick(db: Database, now: number) {
   }
 }
 
-// Freezes both boards as they stood at the end.
+// Saves both boards as they stood at the end, for the record. Waves stop at the end; winners
+// still follow the live boards, so a later score correction or exclusion counts.
 export function snapshot(db: Database, season: Season, now: number) {
   db.transaction(() => {
     const b = boards(db, season, now, true);
@@ -128,9 +131,9 @@ export async function confirmPrize(db: Database, season: Season, playerId: numbe
   if (!p.wallet) throw new GameError("Sign in with a wallet to sign your confirmation.", 409);
   const message = payoutMessage({ seasonId: season.id, playerId, name: p.name ?? "", country: country.trim(), address: getAddress(address.trim()) });
   const ok = await verifyMessage({ address: p.wallet as `0x${string}`, message, signature: signature as `0x${string}` }).catch(() => false);
-  if (!ok) throw new GameError("The signature does not match your wallet.", 401);
+  if (!ok) throw new GameError("The signature does not match your wallet.", 403);
   const r = db
-    .query("UPDATE winners SET confirm = 'confirmed', country = ?, address = ?, message = ?, signature = ?, confirmed_at = ? WHERE id = ? AND confirm = 'waiting'")
+    .query("UPDATE winners SET confirm = 'confirmed', country = ?, address = ?, message = ?, signature = ?, confirmed_at = ? WHERE id = ? AND confirm = 'waiting' AND replaced_at IS NULL")
     .run(country.trim(), getAddress(address.trim()), message, signature, now, w.id);
   if (!r.changes) throw new GameError("Your prize is already confirmed.", 409);
 }
@@ -150,7 +153,7 @@ export function teamCheck(db: Database, admin: string, season: Season, id: numbe
   needEnded(season);
   if (team !== "ok" && team !== "excluded") throw new GameError("Check is ok or excluded.");
   if (team === "excluded" && !reason.trim()) throw new GameError("Give the reason the player will see.");
-  getWinner(db, season, id);
+  if (getWinner(db, season, id).tx_hash) throw new GameError("This prize is already paid.", 409);
   db.query("UPDATE winners SET team = ?, reason = ? WHERE id = ?").run(team, team === "excluded" ? reason.trim() : null, id);
   log(db, admin, "winner-check", { id, team, reason }, now);
   syncWinners(db, season, now);
@@ -192,6 +195,7 @@ export function recordPayout(db: Database, admin: string, season: Season, id: nu
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new GameError("A transaction link needs a 0x hash of 64 characters.");
   const w = getWinner(db, season, id);
   if (w.tx_hash) throw new GameError("This prize is already paid.", 409);
+  if (db.query("SELECT 1 FROM winners WHERE tx_hash = ?").get(txHash.toLowerCase())) throw new GameError("This transaction is already recorded for another prize.", 409);
   if (w.confirm !== "confirmed" || w.team !== "ok" || !w.sanctions_ok) throw new GameError("This winner is not ready for payout.", 409);
   db.query("UPDATE winners SET tx_hash = ? WHERE id = ?").run(txHash.toLowerCase(), id);
   log(db, admin, "payout", { id, txHash }, now);
