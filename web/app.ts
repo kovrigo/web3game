@@ -448,7 +448,7 @@ function friendsTab() {
   return `<section class="panel">
       <div class="head"><h2 class="title">Invite friends</h2><span class="label">+10%</span></div>
       <label class="field"><span>Invite link</span>
-        <button class="input mono" style="text-align:left;color:var(--muted)" data-act="copy" data-text="${esc(link)}" aria-label="Copy invite link ${esc(link)}">${esc(link.replace(/^https?:\/\//, ""))}</button></label>
+        <button class="input mono trunc" style="text-align:left;color:var(--muted)" data-act="copy" data-text="${esc(link)}" aria-label="Copy invite link ${esc(link)}">${esc(link.replace(/^https?:\/\//, ""))}</button></label>
       <button class="btn btn-primary" style="margin-top:12px" data-act="copy" data-text="${esc(link)}" data-copy-label="Copy invite link">Copy invite link</button>
       <p class="small" style="margin-top:12px">+10% of their points, up to ${num(f.cap)} per season. A friend counts after 3 days of play.</p>
     </section>
