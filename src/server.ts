@@ -302,6 +302,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         const b = await body(req);
         const kind = b.kind === "objection" ? "objection" : "appeal";
         if (kind === "objection" && !(S().published_at && now() < P.objectionsUntil(S())!)) throw new GameError("Objections are closed.", 409);
+        if (kind === "objection" && !P.canObject(db, S(), id)) throw new GameError("Only players with a place on this season's tables can object.", 403);
         A.submitAppeal(db, id, String(b.email ?? ""), String(b.text ?? ""), now(), kind);
         return {};
       }),

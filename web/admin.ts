@@ -59,17 +59,20 @@ function seasonEnd(v: any, season: any) {
   if (!s.snapshot_at) return `<section class="panel stack"><h2 class="title">Season end</h2><p class="small">Season ${s.id} ends ${day(s.end)}. Winners appear here after the end.</p>${dev}</section>`;
   const active = v.winners.filter((x: any) => !x.replaced_at);
   const gone = v.winners.filter((x: any) => x.replaced_at);
+  const noPrize = gone.filter((x: any) => x.no_prize);
   const card = (x: any) => `<div class="card">
     <b>${x.board} #${x.place} · ${esc(x.name)} · ${usd(x.prize_usd)}${s.eth_rate ? ` (${(x.prize_usd / s.eth_rate).toFixed(5)} ETH)` : ""}</b>
     <span>Confirm: ${x.confirm}${x.confirm === "waiting" ? ` by ${day(x.deadline)}` : ""} · Team: ${x.team} · Sanctions: ${x.sanctions_ok ? "checked" : "not checked"}${x.tx_hash ? " · paid" : ""}</span>
     <span class="mono">${esc(x.email ?? x.wallet ?? "test sign-in")}</span>
     ${x.address ? `<span>Country ${esc(x.country)} · payout <span class="mono">${esc(x.address)}</span></span><details><summary>Signed confirmation</summary><pre class="mono" style="white-space:pre-wrap">${esc(x.message)}\n\nSigned by ${esc(x.wallet)}\n${esc(x.signature)}</pre></details>` : ""}
     ${x.reason ? `<span class="muted">Reason shown: ${esc(x.reason)}</span>` : ""}
+    ${x.no_prize ? `<b>Restored after a dispute: no prize left (already paid to the next player)</b>` : x.restored_at ? `<span>Restored after a dispute ${day(x.restored_at)}</span>` : ""}
     ${x.replaced_at || x.tx_hash ? (x.tx_hash ? `<span class="mono">tx ${esc(x.tx_hash)}</span>` : "") : `<form class="inline" data-check="${x.id}"><input class="input" name="reason" placeholder="Reason if excluded"><button class="btn btn-secondary" name="team" value="ok">Checked ok</button><button class="btn btn-secondary" name="team" value="excluded">Exclude</button></form>
       ${x.address && !x.sanctions_ok ? `<form class="inline" data-sanctions="${x.id}"><button class="btn btn-secondary">Address passed sanctions check</button></form>` : ""}
       ${x.tx_hash ? `<span class="mono">tx ${esc(x.tx_hash)}</span>` : s.published_at ? `<form class="inline" data-payout="${x.id}"><input class="input mono" name="txHash" placeholder="0x… transaction hash" required><button class="btn btn-secondary">Record payout</button></form>` : ""}`}
   </div>`;
   return `<section class="panel stack"><h2 class="title">Season ${s.id} end</h2>
+      ${noPrize.length ? `<p class="field-error" role="alert">Restored with no prize left: ${noPrize.map((x: any) => esc(x.name)).join(", ")}. See Off the list.</p>` : ""}
       <p class="small">Ended ${day(s.end)}. Published ${day(s.published_at)}. Objections until ${day(v.objectionsUntil)}. Pay by ${day(v.payBy)}. Paid ${day(s.paid_at)}.</p>
       <form class="inline" data-rate><input class="input" name="rate" type="number" step="0.01" min="0" placeholder="Dollars per 1 ETH on payout day" value="${s.eth_rate ?? ""}"><button class="btn btn-secondary">Set ETH rate</button></form>
       ${dev}

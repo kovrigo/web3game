@@ -19,7 +19,7 @@ type Season = {
 };
 type Prize = {
   id: number; board: "points" | "invites"; place: number; prize: number; deadline: number;
-  status: "waiting" | "confirmed" | "paid" | "excluded" | "expired" | "moved"; reason: string | null;
+  status: "waiting" | "confirmed" | "paid" | "excluded" | "expired" | "moved" | "no_prize"; reason: string | null;
   country: string | null; address: string | null; txHash: string | null; eth: number | null;
   wallet: string | null; seasonId: number; playerId: number; name: string;
 };
@@ -700,12 +700,15 @@ function disputeSheet(err = "", kind: "appeal" | "objection" = "appeal") {
     </form>`);
 }
 
+const NO_PRIZE = ["Your dispute was accepted, but no prize is left.", "The prize was already paid to the next player before the answer. Write to the team through Dispute if you have questions."] as const;
+
 function prizeBanner(p: Prize | null) {
   if (!p) return "";
+  if (p.seasonId !== ui.season?.id && p.status !== "paid") return ""; // last season's prize: only a paid one stays, for the transfer
   if (p.status === "excluded") return alertBox("error", "Not on the winners list.", p.reason ?? "");
   if (p.status === "expired") return alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`);
+  if (p.status === "no_prize") return alertBox("warning", NO_PRIZE[0], NO_PRIZE[1]);
   if (p.status === "moved") return "";
-  if (p.seasonId !== ui.season?.id && p.status !== "paid") return ""; // last season's prize: only a paid one stays, for the transfer
   const line = p.status === "waiting" ? `Confirm your country and payout address by ${fmtDay(p.deadline)}.`
     : p.status === "paid" ? "Paid. You can transfer it now." : "Confirmed. Payout comes on one day for all winners.";
   return `<section class="panel"><div class="head"><h2 class="title">You won a prize</h2><span class="label">${esc(boardName(p.board))} · ${p.place}</span></div>
@@ -720,8 +723,10 @@ function prizeScreen() {
   const head = `${back}<h1>Your prize</h1>
     <p class="clock">${usd(p.prize)}<span class="small">${eth(p.eth)}</span></p>
     <p class="small">${cap(boardName(p.board))}, place ${p.place}. Paid in ETH on Robinhood Chain at the rate of the payout day.</p>`;
-  if (p.status === "excluded") return `<main class="read">${head}${alertBox("error", "Not on the winners list.", p.reason ?? "")}${objectButton()}</main>`;
-  if (p.status === "expired") return `<main class="read">${head}${alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`)}</main>`;
+  const dispute = objectButton() || `<button class="btn btn-secondary" data-act="dispute" data-mut>Dispute</button>`;
+  if (p.status === "excluded") return `<main class="read">${head}${alertBox("error", "Not on the winners list.", p.reason ?? "")}${dispute}</main>`;
+  if (p.status === "expired") return `<main class="read">${head}${alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`)}${dispute}</main>`;
+  if (p.status === "no_prize") return `<main class="read">${head}${alertBox("warning", NO_PRIZE[0], NO_PRIZE[1])}</main>`;
   if (p.status === "waiting") {
     return `<main class="read">${head}
       <p>Confirm by <b>${fmtDay(p.deadline)}, ${new Date(p.deadline).toISOString().slice(11, 16)} UTC</b>. Without it, the prize goes to the next player.</p>

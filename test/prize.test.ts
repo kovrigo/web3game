@@ -3,7 +3,7 @@ import type { Database } from "bun:sqlite";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { findOrCreate } from "../src/auth";
 import { openDb } from "../src/db";
-import { submitAppeal } from "../src/admin";
+import { resolveAppeal, submitAppeal } from "../src/admin";
 import { currentSeason, DAY_MS, getPlayer, initSeason, phaseOf, visit, type Season } from "../src/game";
 import { amountAfterGas, assignPrizes, formatEth, payoutMessage } from "../src/payout";
 import * as P from "../src/prize";
@@ -173,4 +173,81 @@ test("publish, objections, payout links, paid, next season", async () => {
   expect(db.query("SELECT item_id FROM gear WHERE player_id = ?").get(a!)).toEqual({ item_id: 36 });
   const log = db.query("SELECT admin, action FROM admin_log ORDER BY id").all() as { action: string }[];
   expect(log.map((l) => l.action)).toContain("next-season");
+});
+
+test("only players with a place on a board of that season may object", () => {
+  const [a] = players(1);
+  const zero = findOrCreate(db, { name: "zero" }, START);
+  db.query("UPDATE players SET rest_at = ? WHERE id = ?").run(START, zero); // never fought: no points
+  P.seasonTick(db, END + 60_000);
+  const late = findOrCreate(db, { name: "late" }, END + DAY_MS);
+  expect(P.canObject(db, S(), a!)).toBe(true);
+  expect(P.canObject(db, S(), zero)).toBe(false);
+  expect(P.canObject(db, S(), late)).toBe(false);
+});
+
+test("hidden winner keeps the real name on the winners list", () => {
+  const [a] = players(1);
+  db.query("UPDATE players SET hidden = 1 WHERE id = ?").run(a!);
+  P.seasonTick(db, END + 60_000);
+  const w = P.activeWinners(db, S())[0]!;
+  db.query("UPDATE winners SET confirm = 'confirmed', address = ? WHERE id = ?").run(`0x${"11".repeat(20)}`, w.id);
+  P.teamCheck(db, "ana", S(), w.id, "ok", "", END + DAY_MS);
+  P.sanctionsCheck(db, "ana", S(), w.id, END + DAY_MS);
+  P.publish(db, "ana", S(), END + DAY_MS);
+  expect(P.publicWinners(db, S())!.map((x) => x.name)).toEqual(["p1"]);
+});
+
+// The player's latest dispute, accepted by the team.
+function accept(playerId: number, t: number) {
+  submitAppeal(db, playerId, "w@example.com", "I am a real person, please check again.", t);
+  const { id } = db.query("SELECT id FROM appeals WHERE player_id = ? ORDER BY id DESC LIMIT 1").get(playerId) as { id: number };
+  resolveAppeal(db, "bo", id, "accepted", "Checked again.", t);
+}
+
+test("accepted dispute restores an excluded winner with their confirmation; the stand-in moves off", () => {
+  const ids = players(21);
+  P.seasonTick(db, END + 60_000);
+  const first = P.activeWinners(db, S()).find((w) => w.player_id === ids[0])!;
+  db.query("UPDATE winners SET confirm = 'confirmed' WHERE id = ?").run(first.id);
+  P.teamCheck(db, "ana", S(), first.id, "excluded", "Same device as another winner.", END + DAY_MS);
+  expect(P.activeWinners(db, S()).some((w) => w.player_id === ids[20])).toBe(true);
+  accept(ids[0]!, END + 2 * DAY_MS);
+  expect(P.myPrize(db, S(), ids[0]!)).toMatchObject({ id: first.id, place: 1, status: "confirmed", reason: null });
+  expect(P.activeWinners(db, S()).find((w) => w.player_id === ids[0])).toMatchObject({ team: "pending" });
+  expect(P.myPrize(db, S(), ids[20]!)!.status).toBe("moved");
+});
+
+test("accepted dispute gives an expired winner 3 more days", () => {
+  const ids = players(21);
+  P.seasonTick(db, END + 60_000);
+  db.query("UPDATE winners SET confirm = 'confirmed' WHERE player_id != ?").run(ids[4]!);
+  const t = END + 7 * DAY_MS + 60_000;
+  P.seasonTick(db, t);
+  expect(P.myPrize(db, S(), ids[4]!)!.status).toBe("expired");
+  accept(ids[4]!, t + DAY_MS);
+  expect(P.myPrize(db, S(), ids[4]!)).toMatchObject({ status: "waiting", place: 5, deadline: t + DAY_MS + 3 * DAY_MS });
+  P.seasonTick(db, t + DAY_MS + 60_000); // the minute tick keeps them on the list
+  expect(P.myPrize(db, S(), ids[4]!)!.status).toBe("waiting");
+});
+
+test("accepted dispute after the prize was paid on: no prize left, the team sees it", () => {
+  const [a, b] = players(2);
+  P.seasonTick(db, END + 60_000);
+  const t = END + DAY_MS;
+  const wa = P.activeWinners(db, S()).find((w) => w.player_id === a)!;
+  P.teamCheck(db, "ana", S(), wa.id, "excluded", "Shared wallet.", t);
+  for (const w of P.activeWinners(db, S())) {
+    db.query("UPDATE winners SET confirm = 'confirmed', address = ? WHERE id = ?").run(`0x${"22".repeat(20)}`, w.id);
+    P.teamCheck(db, "ana", S(), w.id, "ok", "", t);
+    P.sanctionsCheck(db, "ana", S(), w.id, t);
+  }
+  P.publish(db, "ana", S(), t);
+  P.setRate(db, "bo", S(), 3200, t);
+  const paidAt = t + 4 * DAY_MS;
+  P.recordPayout(db, "bo", S(), P.activeWinners(db, S())[0]!.id, `0x${"ef".repeat(32)}`, paidAt);
+  accept(a!, paidAt + DAY_MS);
+  expect(P.myPrize(db, S(), a!)!.status).toBe("no_prize");
+  expect(P.activeWinners(db, S()).map((w) => w.player_id)).toEqual([b]);
+  expect(P.teamView(db, S(), paidAt + DAY_MS).winners.find((w) => w.player_id === a)).toMatchObject({ no_prize: 1 });
 });

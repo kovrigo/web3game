@@ -7,7 +7,7 @@ import type { Database } from "bun:sqlite";
 import { getAddress, isAddress, verifyMessage } from "viem";
 import { PRIZES, SEASON_DAYS } from "./config";
 import { currentSeason, DAY_MS, GameError, getPlayer, tick, type Season } from "./game";
-import { log } from "./admin";
+import { log } from "./db";
 import { assignPrizes, COUNTRY_RE, payoutMessage, type Board } from "./payout";
 import { boards, dropBoardCache } from "./social";
 
@@ -21,6 +21,7 @@ export type Winner = {
   confirm: "waiting" | "confirmed" | "expired"; team: "pending" | "ok" | "excluded"; reason: string | null;
   country: string | null; address: string | null; message: string | null; signature: string | null; confirmed_at: number | null;
   sanctions_ok: number; tx_hash: string | null; replaced_at: number | null; created_at: number;
+  restored_at: number | null; no_prize: number;
 };
 
 // The season whose prizes the game shows: the current one once it ended, else the one before.
@@ -122,7 +123,7 @@ export function myPrize(db: Database, season: Season, playerId: number) {
   const p = getPlayer(db, playerId)!;
   return {
     id: w.id, board: w.board, place: w.place, prize: w.prize_usd, deadline: w.deadline,
-    status: w.replaced_at ? (w.team === "excluded" ? "excluded" : w.confirm === "expired" ? "expired" : "moved") : w.tx_hash ? "paid" : w.confirm,
+    status: w.no_prize ? "no_prize" : w.replaced_at ? (w.team === "excluded" ? "excluded" : w.confirm === "expired" ? "expired" : "moved") : w.tx_hash ? "paid" : w.confirm,
     reason: w.team === "excluded" ? w.reason : null,
     country: w.country, address: w.address, txHash: w.tx_hash,
     eth: season.eth_rate ? w.prize_usd / season.eth_rate : null,
@@ -147,6 +148,37 @@ export async function confirmPrize(db: Database, season: Season, playerId: numbe
     .run(country.trim(), getAddress(address.trim()), message, signature, now, w.id);
   if (!r.changes) throw new GameError("Your prize is already confirmed.", 409);
 }
+
+// An accepted objection or appeal puts back a winner who was excluded or ran out of time by
+// mistake: their own row returns with its confirmation, the team checks it again. Once payouts
+// have started the prize has gone to someone else: the row is marked "no prize left".
+export function restoreWinner(db: Database, admin: string, season: Season, playerId: number, now: number) {
+  const w = db
+    .query<Winner, [number, number]>("SELECT * FROM winners WHERE season_id = ? AND player_id = ? AND replaced_at IS NOT NULL AND (team = 'excluded' OR confirm = 'expired') ORDER BY id DESC LIMIT 1")
+    .get(season.id, playerId);
+  if (!w) return;
+  if (season.paid_at || activeWinners(db, season).some((x) => x.tx_hash)) {
+    db.query("UPDATE winners SET restored_at = ?, no_prize = 1 WHERE id = ?").run(now, w.id);
+    log(db, admin, "winner-restore", { id: w.id, noPrize: true }, now);
+    return;
+  }
+  db.transaction(() => {
+    // Every row that kept this player off the list is cleared; only the latest comes back.
+    db.query(
+      `UPDATE winners SET team = CASE WHEN team = 'excluded' THEN 'pending' ELSE team END, reason = NULL,
+         confirm = CASE WHEN confirm = 'expired' THEN 'waiting' ELSE confirm END WHERE season_id = ? AND player_id = ?`,
+    ).run(season.id, playerId);
+    db.query("UPDATE winners SET replaced_at = NULL, restored_at = ?, deadline = CASE WHEN confirm = 'waiting' THEN ? ELSE deadline END WHERE id = ?").run(
+      now, now + REPLACEMENT_DAYS * DAY_MS, w.id,
+    );
+    log(db, admin, "winner-restore", { id: w.id, noPrize: false }, now);
+  }).immediate();
+  syncWinners(db, season, now);
+}
+
+// Only players with a place on either board of that season may object to its winners list.
+export const canObject = (db: Database, season: Season, playerId: number) =>
+  !!db.query("SELECT 1 FROM snapshots WHERE season_id = ? AND player_id = ? AND value > 0").get(season.id, playerId);
 
 // ---------- team actions
 

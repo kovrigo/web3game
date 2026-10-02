@@ -1,5 +1,7 @@
 import type { Database } from "bun:sqlite";
 import { createHash, timingSafeEqual } from "node:crypto";
+import { log } from "./db";
+import { prizeSeason, restoreWinner } from "./prize";
 import { dayOf, DAY_MS, GameError, type Season } from "./game";
 import { dropBoardCache } from "./social";
 
@@ -17,8 +19,6 @@ export function adminFromToken(tokens: string | undefined, header: string | null
   return null;
 }
 
-export const log = (db: Database, admin: string, action: string, payload: unknown, now: number) =>
-  db.query("INSERT INTO admin_log (admin, action, payload, at) VALUES (?, ?, ?, ?)").run(admin, action, JSON.stringify(payload), now);
 
 // Accounts that share a connection or a device with another account, most shared first.
 export function queue(db: Database) {
@@ -68,6 +68,8 @@ export function resolveAppeal(db: Database, admin: string, id: number, status: s
   if (status === "accepted" && a.kind === "appeal") db.query("UPDATE players SET review = 'ok', review_reason = NULL WHERE id = ?").run(a.player_id);
   log(db, admin, "appeal", { id, status, answer }, now);
   dropBoardCache();
+  const season = prizeSeason(db);
+  if (status === "accepted" && season) restoreWinner(db, admin, season, a.player_id, now);
 }
 
 export function addCorrection(db: Database, admin: string, season: Season, playerId: number, delta: number, reason: string, now: number) {

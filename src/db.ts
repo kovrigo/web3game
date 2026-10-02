@@ -110,6 +110,15 @@ CREATE UNIQUE INDEX winners_tx ON winners(tx_hash) WHERE tx_hash IS NOT NULL;
 CREATE INDEX waiting_player ON waiting_chests(player_id);
 `;
 
+// Version 4: a winner put back after an accepted objection or appeal.
+const RESTORE = `
+ALTER TABLE winners ADD COLUMN restored_at INTEGER;
+ALTER TABLE winners ADD COLUMN no_prize INTEGER NOT NULL DEFAULT 0;   -- put back after the prize was already paid on
+`;
+
+export const log = (db: Database, admin: string, action: string, payload: unknown, now: number) =>
+  db.query("INSERT INTO admin_log (admin, action, payload, at) VALUES (?, ?, ?, ?)").run(admin, action, JSON.stringify(payload), now);
+
 export function openDb(path: string): Database {
   const db = new Database(path, { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL");
@@ -120,7 +129,8 @@ export function openDb(path: string): Database {
     if (v < 1) db.run(SCHEMA);
     if (v < 2) db.run(SEASON_END);
     if (v < 3) db.run(INDEXES);
-    db.run("PRAGMA user_version = 3");
+    if (v < 4) db.run(RESTORE);
+    db.run("PRAGMA user_version = 4");
   })();
   return db;
 }
