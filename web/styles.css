@@ -209,6 +209,7 @@ textarea.input { min-height: 104px; resize: vertical; }
 .back { align-self: flex-start; }
 .fair-lines { display: flex; flex-direction: column; gap: 8px; font-size: 1.0625rem; }
 .check-result { position: relative; min-height: 64px; }
+.check-result:empty { display: none; }
 .check-result .receipt { min-height: 72px; }
 
 .offline-only { display: none; }
