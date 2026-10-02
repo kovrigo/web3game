@@ -424,9 +424,9 @@ function seasonTab() {
     : (sz?.id ?? 1) > 1 ? `<a class="btn btn-secondary" href="#/winners">Last season's winners</a>`
     : "";
   return `${ended}
-    <div class="row-actions" role="group" aria-label="Table">
-      <button class="btn ${k === "points" ? "btn-primary" : "btn-secondary"}" data-act="board" data-kind="points" aria-pressed="${k === "points"}">Points</button>
-      <button class="btn ${k === "invites" ? "btn-primary" : "btn-secondary"}" data-act="board" data-kind="invites" aria-pressed="${k === "invites"}">Invites</button>
+    <div class="seg" role="group" aria-label="Table">
+      <button data-act="board" data-kind="points" aria-pressed="${k === "points"}">Points</button>
+      <button data-act="board" data-kind="invites" aria-pressed="${k === "invites"}">Invites</button>
     </div>
     <p class="small">70% points race · 30% invite race · about 30 prizes · <a href="#/prizes">Prizes</a></p>
     <section class="panel"><div class="head"><h2 class="title">${k === "points" ? "Points race" : "Invite race"}</h2><span class="label">${ui.board[k] ? `${num(ui.board[k].total)} ${k === "points" ? "players" : "inviters"}` : ""}</span></div>
