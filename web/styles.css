@@ -200,7 +200,7 @@ textarea.input { min-height: 104px; resize: vertical; }
 .clock { font: 700 1.5rem/1 var(--mono); font-feature-settings: "tnum"; }
 .land-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .land-links { display: flex; flex-wrap: wrap; gap: 4px 16px; align-items: center; }
-@media (max-width: 760px) { .land-grid { grid-template-columns: 1fr; } }
+@media (max-width: 760px) { .land-grid { grid-template-columns: 1fr; } .land-cta { width: 100%; } }
 
 /* Reading screens */
 .read { max-width: 70ch; margin: 0 auto; padding: calc(24px + var(--safe-top)) 16px 56px; display: flex; flex-direction: column; gap: 16px; }
