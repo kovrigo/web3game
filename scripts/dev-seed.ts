@@ -1,5 +1,5 @@
 // Fills a test database with a few players who played today, so the tables and the
-// live feed have something to show. Test servers only: refuses without DEV_LOGIN=1.
+// live feed have something to show. Test servers only: refuses without DEV_LOGIN=1 and a dev database.
 import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
@@ -8,7 +8,8 @@ import { testAccount } from "../src/devtools";
 import { openDb } from "../src/db";
 import { DAY_MS, dayOf, ensureDays, initSeason, openChest, setSeed, visit } from "../src/game";
 
-if (process.env.DEV_LOGIN !== "1" || !process.env.DB_PATH) throw new Error("Test servers only: set DEV_LOGIN=1 and DB_PATH.");
+// Seeded players use the public test wallets: anyone could sign as them on a real database.
+if (process.env.DEV_LOGIN !== "1" || !/dev/.test(process.env.DB_PATH ?? "")) throw new Error("Test servers only: set DEV_LOGIN=1 and a DB_PATH with 'dev'.");
 mkdirSync(dirname(process.env.DB_PATH), { recursive: true });
 const db = openDb(process.env.DB_PATH);
 const season = initSeason(db, Date.parse(process.env.SEASON_START ?? ""));

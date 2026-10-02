@@ -421,6 +421,8 @@ if (import.meta.main) {
   if (!env.PORT) throw new Error("PORT is not set. Start the dev server with `paneweb up`.");
   // A real server never guesses its own address or runs without a salt for IP hashes.
   if (env.DEV_LOGIN !== "1" && (!env.PUBLIC_ORIGIN || !env.IP_SALT)) throw new Error("PUBLIC_ORIGIN and IP_SALT must be set.");
+  // Without https the session cookie travels in clear text.
+  if (env.DEV_LOGIN !== "1" && !env.PUBLIC_ORIGIN!.startsWith("https://")) throw new Error("PUBLIC_ORIGIN must start with https://.");
   if (env.DEV_LOGIN !== "1" && env.ADMIN_TOKENS && env.ADMIN_TOKENS.split(",").some((p) => p.slice(p.indexOf(":") + 1).length < 24)) throw new Error("Each team key in ADMIN_TOKENS needs 24 characters or more.");
   // Test sign-in lets anyone in by name: it never runs next to a real chain or treasury.
   if (env.DEV_LOGIN === "1" && (env.CHAIN_ID || env.TREASURY_ADDRESS || !/dev/.test(env.DB_PATH ?? ""))) {

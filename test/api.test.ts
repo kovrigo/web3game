@@ -211,3 +211,16 @@ test("posts from another site are refused, same-site posts pass", async () => {
   expect(evil.status).toBe(403);
   expect((await call("/api/settings", { hidden: true }, { ...s, origin: base })).status).toBe(200);
 });
+
+test("real server refuses plain http; the test seed refuses a real database", async () => {
+  const run = (cmd: string[], env: Record<string, string>) => {
+    const p = Bun.spawnSync(cmd, { env: { PATH: process.env.PATH!, ...env }, cwd: `${import.meta.dir}/..` });
+    return { code: p.exitCode, err: p.stderr.toString() };
+  };
+  const http = run(["bun", "src/server.ts"], { PORT: "0", PUBLIC_ORIGIN: "http://game.example", IP_SALT: "s" });
+  expect(http.code).not.toBe(0);
+  expect(http.err).toContain("PUBLIC_ORIGIN must start with https://");
+  const seed = run(["bun", "scripts/dev-seed.ts"], { DEV_LOGIN: "1", DB_PATH: "data/game.sqlite" });
+  expect(seed.code).not.toBe(0);
+  expect(seed.err).toContain("DB_PATH with 'dev'");
+});
