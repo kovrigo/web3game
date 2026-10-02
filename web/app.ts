@@ -1,6 +1,6 @@
 // Season One client. One page, hash routes, no framework.
 // Server holds every number; this file only shows them and asks for changes.
-import { FOUNDER_DAYS, type Rarity, type Table } from "../src/config";
+import { fmtDate, FOUNDER_DAYS, type Rarity, type Table } from "../src/config";
 import { toHex, verifyDay, type CheckRoll, type LocalRecord } from "../src/fair";
 import { amountAfterGas, formatEth, payoutMessage, TRANSFER_GAS } from "../src/payout";
 
@@ -39,8 +39,8 @@ const count = (n: number, one: string) => `${num(n)} ${one}${n === 1 ? "" : "s"}
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 const pad = (n: number) => String(n).padStart(2, "0");
 const short = (h: string) => `${h.slice(0, 4)}…${h.slice(-4)}`;
-const fmtDay = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
-const fmtDayShort = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
+const fmtDay = (ms: number) => fmtDate(ms);
+const fmtDayShort = (ms: number) => fmtDate(ms, false);
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const clock = () => Date.now() + skew;
 const over = (phase: string) => phase === "ended" || phase === "published" || phase === "paid";

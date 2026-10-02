@@ -420,7 +420,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
 }
 
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
-const fmtDay = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString("en-GB", { day: "2-digit", month: "short", year: "numeric", timeZone: "UTC" });
+const fmtDay = (day: string) => C.fmtDate(Date.parse(`${day}T00:00:00Z`));
 
 if (import.meta.main) {
   const env = process.env;

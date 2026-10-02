@@ -50,3 +50,10 @@ export const PRIZES = {
   invites: [400, 250, 150, ...Array(7).fill(100)] as number[],
 };
 export const PRIZE_FUND = 5000;
+
+// "02 Oct 2026" everywhere, cards included: the en-GB locale writes "Sept", which breaks the pattern.
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+export const fmtDate = (ms: number, year = true) => {
+  const d = new Date(ms);
+  return `${String(d.getUTCDate()).padStart(2, "0")} ${MONTHS[d.getUTCMonth()]}${year ? ` ${d.getUTCFullYear()}` : ""}`;
+};
