@@ -75,11 +75,11 @@ export function resolveAppeal(db: Database, admin: string, id: number, status: s
 export function addCorrection(db: Database, admin: string, season: Season, playerId: number, delta: number, reason: string, now: number) {
   if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 1_000_000_000) throw new GameError("Change must be a whole number, not zero, at most 1,000,000,000.");
   if (!reason.trim()) throw new GameError("Give the reason that will be announced.");
-  const p = db.query<{ name: string }, [number]>("SELECT name FROM players WHERE id = ?").get(playerId);
+  const p = db.query<{ name: string; hidden: number }, [number]>("SELECT name, hidden FROM players WHERE id = ?").get(playerId);
   if (!p) throw new GameError("No such player.", 404);
   db.query("INSERT INTO corrections (player_id, delta, reason, at, season_id) VALUES (?, ?, ?, ?, ?)").run(playerId, delta, reason.trim(), now, season.id);
   db.query("INSERT INTO announcements (text, at) VALUES (?, ?)").run(
-    `Score correction: ${p.name ?? "a player"} ${delta > 0 ? "+" : ""}${delta.toLocaleString("en-US")} pts. ${reason.trim()}`, now,
+    `Score correction: ${p.hidden ? "Hidden player" : (p.name ?? "a player")} ${delta > 0 ? "+" : ""}${delta.toLocaleString("en-US")} pts. ${reason.trim()}`, now,
   );
   log(db, admin, "correction", { playerId, delta, reason }, now);
   dropBoardCache();
