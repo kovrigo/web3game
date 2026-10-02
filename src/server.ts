@@ -79,6 +79,9 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
   // Every handler: JSON in, JSON out, errors as { error } with the sentence the player sees.
   const h = (fn: (req: Request & { params: Record<string, string> }) => unknown) => async (req: any) => {
     try {
+      // Another site's page may not post with the player's cookie (the cookie's SameSite covers browsers, this covers sibling subdomains).
+      const from = req.headers.get("origin");
+      if (req.method !== "GET" && from && from !== origin(req)) throw new GameError("Requests from other sites are refused.", 403);
       const out = await fn(req);
       return out instanceof Response ? out : json(out);
     } catch (e) {

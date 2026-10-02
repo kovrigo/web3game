@@ -204,3 +204,10 @@ test("wrong team keys are rate limited", async () => {
   expect((await call("/api/admin/queue", undefined, { authorization: "Bearer guess-last" })).status).toBe(429);
   expect((await call("/api/admin/queue", undefined, { authorization: "Bearer k1" })).status).toBe(200);
 });
+
+test("posts from another site are refused, same-site posts pass", async () => {
+  const s = sid((await call("/api/auth/dev", { name: "crosssite", accept: true })).cookie);
+  const evil = await call("/api/settings", { hidden: true }, { ...s, origin: "https://evil.example" });
+  expect(evil.status).toBe(403);
+  expect((await call("/api/settings", { hidden: true }, { ...s, origin: base })).status).toBe(200);
+});
