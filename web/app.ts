@@ -724,11 +724,14 @@ function prizeBanner(p: Prize | null) {
 
 function prizeScreen() {
   const p = ui.state?.prize as Prize | null;
+  // Table place differs from prize place when a player above took the other race's bigger prize. Last season's prize has no live table.
+  const rank = p && p.seasonId === ui.season?.id ? (p.board === "invites" ? ui.state?.friends.invites.rank : ui.state?.season.rank) : null;
   const back = `<a class="ghost back" href="#/hero">Back</a>`;
   if (!p) return `<main class="read">${back}<h1>Your prize</h1><p>No prize this season.</p></main>`;
   const head = `${back}<h1>Your prize</h1>
     <p class="clock">${usd(p.prize)}<span class="small">${eth(p.eth)}</span></p>
-    <p class="small">${cap(boardName(p.board))}, place ${p.place}. Paid in ETH on Robinhood Chain at the rate of the payout day.</p>`;
+    <p class="small">${cap(boardName(p.board))}, place ${p.place}. Paid in ETH on Robinhood Chain at the rate of the payout day.</p>
+    ${rank && rank > p.place ? `<p class="small">Table place ${num(rank)}. A player above took a bigger ${p.board === "points" ? "invite" : "points"} prize, so you moved up.</p>` : ""}`;
   const dispute = objectButton() || `<button class="btn btn-secondary" data-act="dispute" data-mut>Dispute</button>`;
   if (p.status === "excluded") return `<main class="read">${head}${alertBox("error", "Not on the winners list.", p.reason ?? "")}${dispute}</main>`;
   if (p.status === "expired") return `<main class="read">${head}${alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`)}${dispute}</main>`;
