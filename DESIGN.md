@@ -16,9 +16,14 @@ colors:
   on-primary: "#1F0A12"
   paper: "#F3E9D2"
   on-paper: "#2A211B"
-  paper-muted: "#7A6A58"
+  paper-ink-muted: "#6A5B4A"
+  paper-ink-verified: "#1A6B47"
+  paper-ink-common: "#655C55"
+  paper-ink-uncommon: "#3A7020"
+  paper-ink-rare: "#2A60A8"
+  paper-ink-epic: "#6A35BE"
+  paper-ink-legendary: "#9A4A00"
   verified: "#3DDC97"
-  verified-ink: "#1E7A52"
   warning: "#FFC93C"
   error: "#F0443A"
   rarity-common: "#A39A92"
@@ -105,9 +110,9 @@ components:
     textColor: "{colors.text-muted}"
     rounded: "{rounded.md}"
   input:
-    backgroundColor: "{colors.surface}"
+    backgroundColor: "{colors.ground}"
     textColor: "{colors.text}"
-    borderColor: "{colors.border}"
+    borderColor: "{colors.text-muted}"
     rounded: "{rounded.sm}"
     height: 48px
   panel:
@@ -141,6 +146,14 @@ components:
     textColor: "{colors.text-muted}"
     activeTextColor: "{colors.text}"
     typography: "{typography.label}"
+  tab-bar:
+    backgroundColor: "{colors.surface}"
+    height: 60px
+  season-bar:
+    backgroundColor: "{colors.surface}"
+    textColor: "{colors.text}"
+    typography: "{typography.mono}"
+    height: 48px
 ---
 
 # Season One (working name)
@@ -185,12 +198,21 @@ Rules:
 
 - `primary` is interaction only: buttons, active meter fill, streak days earned, focus ring. Never decoration, never text on the dark ground.
 - Robinhood green is not used. It belongs to the chain and to Hood Siege.
-- `verified` means one thing: a fairness check passed or a state is confirmed. On paper, use `verified-ink`.
+- `verified` means one thing: a fairness check passed or a state is confirmed. On paper, use `paper-ink-verified`. No other green dot or "live" light anywhere.
 - `warning` and `error` always come with an icon and a text label. Color alone never carries a state.
+- `error` text sits only on `surface` or `ground`. On `surface-raised` it drops to 4.0:1.
 - Rarity colors appear on item frames, rarity labels and live feed item names. Never on buttons or backgrounds.
 - Legendary orange and warning yellow are close in warmth. Legendary never appears without an item frame or item name.
 - Neutrals are warm browns derived from the ground. Raise a surface by stepping `ground`, `surface`, `surface-raised`. Never lighten by opacity.
-- Contrast: `text` and `text-muted` pass 4.5:1 on `surface-raised`. `on-primary` on `primary` passes 7:1.
+- Contrast: `text` and `text-muted` pass 4.5:1 on `surface-raised`. `on-primary` on `primary` is 6.0:1. All five rarity colors pass 4.5:1 on `surface` and `surface-raised`.
+
+**Paper inks.** Dark-ground colors fail on cream paper: rarity colors land between 1.7:1 and 2.7:1, `primary` at 2.6:1. Anything printed on `paper` (receipt, share card, founder chip) uses its own inks, each at least 4.8:1 on `paper`:
+
+- `on-paper` for main text, `paper-ink-muted` for labels and secondary lines.
+- `paper-ink-verified` for the "Verified" stamp.
+- `paper-ink-common`, `paper-ink-uncommon`, `paper-ink-rare`, `paper-ink-epic`, `paper-ink-legendary` for the rarity label and the 3px item frame on paper.
+- Focus ring on paper is `on-paper`, not `primary`.
+- Never put a dark-ground token on paper, and never a paper ink on the dark ground.
 
 ## Typography
 
@@ -209,8 +231,10 @@ Do not use Press Start 2P, Silkscreen, Bungee or Cinzel. They are Hood Siege's v
 ## Layout
 
 - Mobile first. Design at 390px wide with a 16px side gutter. No horizontal page scroll.
-- Phone: one column, bottom tab bar with four tabs: Hero, Chests, Season, Friends. Primary action sits in thumb reach, full width.
-- Tablet and desktop (1024px and up): the game column stays at most 480px wide. Leaderboard and live feed move to a side column at most 360px wide. Landing page content is at most 1120px wide.
+- Phone: one column, season bar pinned on top, bottom tab bar with four tabs: Hero, Chests, Season, Friends. Primary action sits in thumb reach, full width.
+- Tablet (up to 1023px): phone layout, column at most 480px wide and centred.
+- Desktop (1024px and up): 64px header with name, tabs and season bar numbers. Game column at most 480px wide. Leaderboard and live feed sit in a side column at most 360px wide. On the Season tab the full leaderboard takes the game column and the side column keeps only the feed. Landing page content is at most 1120px wide.
+- Narrow phone (320px): season bar numbers never wrap; the "pts" unit drops first.
 - Spacing scale is 4px based. Inside a panel use 8 to 16px. Between panels use 12px. Between page sections use 32 to 56px.
 - Density: compact on game screens, roomy on Read screens.
 - Grid breaks on purpose in one place: the chest reel runs edge to edge past the gutter.
@@ -231,19 +255,26 @@ Do not use Press Start 2P, Silkscreen, Bungee or Cinzel. They are Hood Siege's v
 - `full`: chips, badges and meters only.
 - Nested elements: inner radius equals outer radius minus the gap.
 - Never a card inside a card. A panel holds rows, not more panels.
+- One dominant panel per tab: Hero the away summary, Chests the waiting chests, Season the leaderboard, Friends the invite link. Everything else is a flat section: title, rows, dividers, no panel fill.
 
 ## Components
 
 - **Buttons:** primary, secondary, ghost (underlined text), disabled. Height 48px minimum. Labels name the outcome: "Open daily chest", "Copy invite link", "Check this roll". Disabled buttons that wait on time show the countdown: "Next chest in 4h 12m". Focus-visible: 2px `primary` outline, 2px offset.
-- **Input:** 48px high, `border` outline, `primary` focus ring. Error shows `error` icon and message under the field.
+- **Input:** 48px high, `ground` fill, 1px `text-muted` outline so the field shows on any surface, `primary` focus ring. Visible label above, never a placeholder as the only label. Error shows `error` icon and message under the field.
+- **Season bar:** 48px, pinned on every game screen, including the chest reel. Three mono values: rank, points, countdown ("#212 | 18,420 pts | 18d 07h 42m"). The whole bar is one button that opens the Season tab. Countdown updates each minute; on the final day it shows seconds in `warning` with a "Final day" label. Phase variants: "Starts in", "Unranked" before first points, "Under review" in place of rank, "final" after the season ends.
+- **Tab bar:** 60px, four tabs, label style. Active tab: `text` color and a 3px `primary` bar. Arrow keys move between tabs.
 - **Panel:** the one container. Title row on top: title left, status label or number right.
-- **Receipt:** cream paper slip. Item with rarity frame, then a dashed rule, then labelled mono lines: roll number and date, server seed hash, player seed. A "Verified" stamp lands after a passed check. The same receipt is the share card image.
-- **Rarity frame:** 3px border in the rarity color around item art. Rarity name above the item name in label style.
+- **Receipt:** cream paper slip. Item with rarity frame, then a dashed rule, then labelled mono lines: roll number and date, server seed hash, player seed. Three states:
+  - Sealed: the server secret is not revealed until 00:00 UTC. The receipt shows "Sealed. Checkable after 00:00 UTC" and no stamp.
+  - Verified: the player ran the check after the reveal and it passed. The stamp lands.
+  - Mismatch: the check failed. `error` alert under the receipt with the mismatching roll numbers.
+- **Share card:** the receipt on the dark table, 1200 x 630, with player name, founder chip and invite link. Never carries a stamp: the link opens the live receipt page, which shows the current check state.
+- **Rarity frame:** 3px border in the rarity color around item art. Rarity name above the item name in label style. On paper, frame and name use the paper inks.
 - **Streak row:** seven 28px squares, earned days filled `primary`. A missed day steps back one square, matching the game rule.
 - **Guarantee meter:** 12px bar, `primary` fill, mono count on the right ("2 / 3 days"), plain sentence under it.
 - **Chips:** status and identity. The founder chip is cream paper with dark text, so it reads as a ticket stub next to any name.
 - **Leaderboard row:** rank (mono, muted), name, optional founder chip, points (mono, right aligned). The player's own row uses `surface-raised` and stays pinned when the list scrolls.
-- **Live feed row:** player name (or "Hidden player"), "found", item name in rarity color, age. Empty state text: "No rare drops yet this season."
+- **Live feed row:** player name (or "Hidden player"), "found", item name in rarity color, rarity word, age. The rarity word is always there, so color never carries rarity alone. The panel label reads "Live" as plain text, no dot. Empty state text: "No rare drops yet this season."
 - **Alerts:** `surface` background, icon and bold first phrase in the state color, plain text after. Success uses `verified`.
 - **Countdown:** mono, bold. Season end and next game day (00:00 UTC) use the same component.
 - Every component has designed empty, loading, error and long-name states. Long names truncate with an ellipsis at one line.
@@ -266,8 +297,10 @@ Do not use Press Start 2P, Silkscreen, Bungee or Cinzel. They are Hood Siege's v
 - **Approach:** intentional. Short state transitions everywhere, one authored moment.
 - **Easing:** enter ease-out, exit ease-in, move ease-in-out.
 - **Duration:** micro 80ms (press), short 200ms (state change), medium 320ms (sheet open), long 600ms (receipt slide-in).
-- **The one authored moment:** the chest reel. Items scroll under the pink center line and slow to the result in about 3 seconds. The receipt then slides up from below. When a fairness check passes, the "Verified" stamp lands on the receipt with a short scale-down and a light haptic tap on phones.
-- `prefers-reduced-motion`: the reel jumps straight to the result and the stamp appears without movement.
+- **The one authored moment:** the chest reel. Items scroll under the pink center line and slow to the result in about 3 seconds. The receipt then slides up from below. When a fairness check passes, the "Verified" stamp lands on the receipt with a short scale-down and a light haptic tap on phones. The stamp never lands at roll time: the check is possible only after the 00:00 UTC reveal.
+- **Live feed:** a new row slides in from the top in 320ms. At most one row per 5 seconds; extra rows wait in a queue.
+- **Loading:** skeleton rows at final row height. No full-screen spinner.
+- `prefers-reduced-motion`: the reel jumps straight to the result, receipt and stamp appear without movement, feed rows appear without sliding, skeletons do not pulse.
 
 ## Decisions Log
 
@@ -277,3 +310,9 @@ Do not use Press Start 2P, Silkscreen, Bungee or Cinzel. They are Hood Siege's v
 - 2026-10-02: Chest reel kept, as the Brief requires. Alternative: tear-off ticket strip.
 - 2026-10-02: Paper receipt and "Verified" stamp adopted as the fairness and share visual. Alternative: green check icon only.
 - 2026-10-02: Bricolage Grotesque, Instrument Sans and JetBrains Mono chosen. Alternatives: Alfa Slab One display, Atkinson Hyperlegible body, Courier Prime mono.
+- 2026-10-02: Mockup direction C "Scoreboard" picked: season bar always on top, leaderboard and live feed dominant, share buttons first on a rare result. Alternatives: options A and B.
+- 2026-10-02: Paper inks added for small text on cream paper: `paper-ink-muted` #6A5B4A, `paper-ink-rare` #2A60A8 and `paper-ink-verified` #1A6B47 from the mockup, plus inks for the other four rarities. They replace `paper-muted` and `verified-ink`, which failed 4.5:1. Reason: keeps the receipt, the core fairness and share visual. Alternative: change the mockup direction and drop cream paper.
+- 2026-10-02: Season bar and tab bar added as components. Inputs get a `text-muted` outline; the `border` color is 1.4:1 and hides the field.
+- 2026-10-02: Mockup fixes: "Verified" stamp only after a check, never at roll time; no green "live" dot, since green means verified only; rarity always named in words.
+- 2026-10-02: One dominant panel per tab, the rest flat sections. Alternative: the mockup's stack of equal panels, which reads as a template and gives the eye no first stop.
+- 2026-10-02: Copy buttons and every tap target at least 44px; the mockup's 28px copy button is replaced.
