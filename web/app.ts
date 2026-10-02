@@ -825,12 +825,16 @@ async function transferQuote() {
 
 // ---------- render
 
+// Desktop header with tabs, or the pinned phone bar: game tabs and reading screens alike.
+const header = () => `<header class="deskhead"><span class="brand">Season One</span>${tabs("desk-tabs")}${bar()}</header>
+    <div class="phone-bar">${bar()}</div>`;
+
 function render() {
   const r = route();
   const offlineBanner = offline ? alertBox("warning", `Offline. Showing data from ${lastOk ? new Date(lastOk).toTimeString().slice(0, 5) : "earlier"}.`, "Actions wait until you are back online.") : "";
   if (["rules", "odds", "prizes", "fair", "receipt", "prize", "winners"].includes(r.name)) {
     const screen = { rules: rulesScreen, odds: oddsScreen, prizes: prizesScreen, fair: fairScreen, receipt: receiptScreen, prize: prizeScreen, winners: winnersScreen }[r.name as "rules"]!;
-    $app.innerHTML = `${ui.session && ui.state ? bar() : ""}${offlineBanner}${ui.error || notice ? `<div class="read" style="padding-bottom:0">${ui.error ? alertBox("error", ui.error) : notice}</div>` : ""}${screen()}`;
+    $app.innerHTML = `${ui.session && ui.state ? header() : ""}${offlineBanner}${ui.error || notice ? `<div class="read" style="padding-bottom:0">${ui.error ? alertBox("error", ui.error) : notice}</div>` : ""}${screen()}`;
     return;
   }
   if (!ui.session) {
@@ -849,8 +853,7 @@ function render() {
        <section class="panel">${feedSection(r.name === "season" ? 10 : 6, false)}</section></aside>`
     : "";
   $app.innerHTML = `<div class="shell">
-    <header class="deskhead"><span class="brand">Season One</span>${tabs("desk-tabs")}${bar()}</header>
-    <div class="phone-bar">${bar().replace('class="seasonbar"', 'class="seasonbar phone"')}</div>
+    ${header()}
     <div class="desk-main"><main class="main" id="main">${offlineBanner}${ui.error ? alertBox("error", ui.error) : notice}${body}</main>${side}</div>
     ${tabs("tabbar")}
   </div>`;
