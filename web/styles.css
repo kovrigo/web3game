@@ -84,7 +84,7 @@ a { color: var(--text); text-underline-offset: 3px; }
 .lb-name { display: flex; align-items: center; gap: 6px; min-width: 0; font-weight: 600; font-size: .9375rem; }
 .lb-name .n, .trunc { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0; }
 .lb-pts { text-align: right; font-size: .9375rem; }
-.lb-me { background: var(--raised); border-radius: 10px; padding: 0 12px; margin: 0 -8px; border: 0; grid-template-columns: 36px minmax(0, 1fr) auto; }
+.lb-me { background: var(--raised); border-radius: 10px; padding: 0 8px; margin: 0 -8px; border: 0; }
 .lb-pin { position: sticky; bottom: calc(68px + var(--safe-bottom)); padding-top: 8px; background: var(--surface); }
 .lb-gap { display: block; font: 400 .75rem var(--mono); color: var(--muted); font-weight: 400; }
 .prize-line { display: flex; align-items: center; gap: 8px; margin: 4px 0; color: var(--primary); font: 600 .6875rem var(--body); letter-spacing: .06em; text-transform: uppercase; }
