@@ -372,7 +372,7 @@ function heroTab() {
     : `<button class="btn btn-primary" data-act="open" data-kind="daily" data-mut>Open daily chest</button>`;
   const near = (() => {
     const b = ui.board.points;
-    if (!b?.me || s.season.underReview) return "";
+    if (!b?.me || s.season.underReview || !(b.me.points > 0)) return ""; // same rule as "Unranked" in the season bar
     const above = b.me.rank > 1 ? b.rows.find((x: any) => x.rank === b.me.rank - 1) : null;
     return `<section class="section phone-only"><div class="head"><h2 class="title">Near you</h2><span class="label">Season</span></div>
       ${above ? `<div class="lb-row"><span class="lb-rank mono">${above.rank}</span><span class="lb-name"><span class="n">${esc(above.name)}</span>${founderChip(above.founder)}</span><span class="lb-pts mono">${num(above.points)}</span></div>` : ""}
