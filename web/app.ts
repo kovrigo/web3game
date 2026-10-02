@@ -35,6 +35,7 @@ const desktop = () => matchMedia("(min-width: 1024px)").matches;
 
 const esc = (s: unknown) => String(s ?? "").replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
 const num = (n: number) => n.toLocaleString("en-US");
+const count = (n: number, one: string) => `${num(n)} ${one}${n === 1 ? "" : "s"}`;
 const cap = (s: string) => s[0]!.toUpperCase() + s.slice(1);
 const pad = (n: number) => String(n).padStart(2, "0");
 const short = (h: string) => `${h.slice(0, 4)}…${h.slice(-4)}`;
@@ -265,8 +266,7 @@ function boardRows(kind: "points" | "invites", limit: number, pinMe: boolean) {
     if (i + 1 === b.places && rows.length > b.places) html += `<div class="prize-line">Prize line</div>`;
   });
   if (pinMe && b.me && !rows.some((r: any) => r.me)) {
-    const unit = kind === "points" ? "pts" : "friends";
-    html += `<div class="lb-pin"><div class="lb-row lb-me"><span class="lb-rank mono">${b.me.rank}</span><span class="lb-name"><span class="n">${esc(b.me.name)}<span class="lb-gap">${b.me.gap ? `${num(b.me.gap)} ${unit} to prize line` : ""}</span></span>${founderChip(b.me.founder)}</span><span class="lb-pts mono">${val(b.me)}</span></div></div>`;
+    html += `<div class="lb-pin"><div class="lb-row lb-me"><span class="lb-rank mono">${b.me.rank}</span><span class="lb-name"><span class="n">${esc(b.me.name)}<span class="lb-gap">${b.me.gap ? `${kind === "points" ? `${num(b.me.gap)} pts` : count(b.me.gap, "friend")} to prize line` : ""}</span></span>${founderChip(b.me.founder)}</span><span class="lb-pts mono">${val(b.me)}</span></div></div>`;
   }
   return html;
 }
@@ -297,7 +297,7 @@ function home() {
     </div>
     ${ui.signedOut ? alertBox("warning", "Signed out.", "Sign in to continue.") : ""}
     <div class="land-grid">
-      <section class="panel"><div class="head"><h2 class="title">Leaderboard</h2><span class="label">${ui.board.points ? `${num(ui.board.points.total)} players` : ""}</span></div>${boardRows("points", 3, false)}</section>
+      <section class="panel"><div class="head"><h2 class="title">Leaderboard</h2><span class="label">${ui.board.points ? count(ui.board.points.total, "player") : ""}</span></div>${boardRows("points", 3, false)}</section>
       <section class="panel">${feedSection(3, false)}</section>
     </div>
     <p class="land-links small"><a href="#/rules">Season rules</a><a href="#/odds">Odds</a><a href="#/fair">How we can't rig it</a><span>18+</span></p>
@@ -429,7 +429,7 @@ function seasonTab() {
       <button data-act="board" data-kind="invites" aria-pressed="${k === "invites"}">Invites</button>
     </div>
     <div class="head"><p class="small">70% points race · 30% invite race · about 30 prizes</p><a class="ghost" href="#/prizes">Prizes</a></div>
-    <section class="panel"><div class="head"><h2 class="title">${k === "points" ? "Points race" : "Invite race"}</h2><span class="label">${ui.board[k] ? `${num(ui.board[k].total)} ${k === "points" ? "players" : "inviters"}` : ""}</span></div>
+    <section class="panel"><div class="head"><h2 class="title">${k === "points" ? "Points race" : "Invite race"}</h2><span class="label">${ui.board[k] ? count(ui.board[k].total, k === "points" ? "player" : "inviter") : ""}</span></div>
       ${boardRows(k, 50, true)}
     </section>
     <section class="section ${desktop() ? "phone-only" : ""}">${feedSection(10, false)}</section>
@@ -458,7 +458,7 @@ function friendsTab() {
       ${f.refPoints ? `<p class="small" style="margin-top:8px">From friends: <span class="mono">${num(f.refPoints)}</span> pts</p>` : ""}
     </section>
     <section class="section"><div class="head"><h2 class="title">Invite race</h2><span class="label">30% of prizes</span></div>
-      ${inv.rank ? `<p><span class="clock">#${num(inv.rank)}</span> <span class="small">of <span class="mono">${num(inv.total)}</span> inviters</span></p>${inv.gap ? `<p class="small">${num(inv.gap)} more counted friends to the prize line.</p>` : ""}` : `<p class="small">Not in the race yet. Your first counted friend puts you on the table.</p>`}
+      ${inv.rank ? `<p><span class="clock">#${num(inv.rank)}</span> <span class="small">of <span class="mono">${num(inv.total)}</span> inviter${inv.total === 1 ? "" : "s"}</span></p>${inv.gap ? `<p class="small">${count(inv.gap, "more counted friend")} to the prize line.</p>` : ""}` : `<p class="small">Not in the race yet. Your first counted friend puts you on the table.</p>`}
       <a class="ghost" href="#/season" data-act="board-invites">Full table</a>
     </section>
     <section class="section"><div class="head"><h2 class="title">Founder badge</h2>${founderChip(s.player.founder)}</div>
@@ -849,7 +849,7 @@ function render() {
   if (ui.opening) body = openingScreen();
   else body = ({ hero: heroTab, chests: chestsTab, season: seasonTab, friends: friendsTab } as Record<string, () => string>)[r.name]?.() ?? heroTab();
   const side = desktop()
-    ? `<aside class="side">${r.name === "season" ? "" : `<section class="panel"><div class="head"><h2 class="title">Leaderboard</h2><span class="label">${ui.board.points ? `${num(ui.board.points.total)} players` : ""}</span></div>${boardRows("points", 5, true)}</section>`}
+    ? `<aside class="side">${r.name === "season" ? "" : `<section class="panel"><div class="head"><h2 class="title">Leaderboard</h2><span class="label">${ui.board.points ? count(ui.board.points.total, "player") : ""}</span></div>${boardRows("points", 5, true)}</section>`}
        <section class="panel">${feedSection(r.name === "season" ? 10 : 6, false)}</section></aside>`
     : "";
   $app.innerHTML = `<div class="shell">
