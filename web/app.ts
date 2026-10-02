@@ -763,7 +763,7 @@ function prizeScreen() {
 
 function objectButton() {
   const s = ui.season;
-  return s?.objectionsUntil && clock() < s.objectionsUntil && ui.session ? `<button class="btn btn-secondary" data-act="object" data-mut>Object to the list</button>` : "";
+  return s?.objectionsUntil && clock() < s.objectionsUntil && ui.state?.canObject ? `<button class="btn btn-secondary" data-act="object" data-mut>Object to the list</button>` : "";
 }
 
 function winnersScreen() {

@@ -51,6 +51,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     const s = P.prizeSeason(db);
     return s ? P.myPrize(db, s, id) : null;
   };
+  const state = (id: number, t: number) => ({ ...buildState(db, id, t, S()), prize: prize(id), canObject: P.canObject(db, S(), id) });
   const exchanges = (env.EXCHANGES ?? "").split(",").filter(Boolean).map((e) => {
     const [name, url] = e.split("|");
     return { name: name!.trim(), url: url?.trim() ?? null };
@@ -196,7 +197,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         ensureDays(db, t);
         visit(db, id, t, S(), typeof b.seed === "string" ? b.seed : undefined);
         if (typeof b.device === "string") recordSignal(db, id, ipHash(salt, ip(req)), b.device, t);
-        return { ...buildState(db, id, t, S()), prize: prize(id) };
+        return state(id, t);
       }),
     },
 
@@ -208,7 +209,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         if (kind !== "daily" && kind !== "guaranteed") throw new GameError("Unknown chest.");
         const t = now();
         const r = openChest(db, id, kind, t, S()); // points move only with waves: the board cache stays
-        return { roll: rollView(db, S(), r), state: { ...buildState(db, id, t, S()), prize: prize(id) } };
+        return { roll: rollView(db, S(), r), state: state(id, t) };
       }),
     },
 
