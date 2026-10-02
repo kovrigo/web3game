@@ -65,6 +65,9 @@ export function snapshot(db: Database, season: Season, now: number) {
   syncWinners(db, currentSeason(db)!, now);
 }
 
+// No points, no prize: in a thin season a player who never fought does not take a points-race place.
+const contenders = (b: ReturnType<typeof boards>) => [b.points.filter((r) => r.points > 0).map((r) => r.id), b.invites.map((r) => r.id)] as const;
+
 // Keeps the winner rows in line with the boards. Rows follow the player, not the place:
 // when someone above drops out, the others move up and keep their confirmation.
 export function syncWinners(db: Database, season: Season, now: number) {
@@ -74,7 +77,7 @@ export function syncWinners(db: Database, season: Season, now: number) {
       db.query<{ player_id: number }, [number]>("SELECT player_id FROM winners WHERE season_id = ? AND (team = 'excluded' OR confirm = 'expired')").all(season.id).map((r) => r.player_id),
     );
     const b = boards(db, season, now, true);
-    const { slots } = assignPrizes(b.points.map((r) => r.id), b.invites.map((r) => r.id), out);
+    const { slots } = assignPrizes(...contenders(b), out);
     const active = activeWinners(db, season);
     if (active.some((w) => w.tx_hash)) return; // payouts started: the list is fixed
     for (const s of slots) {
@@ -273,7 +276,7 @@ export function teamView(db: Database, season: Season, now: number) {
   const list = db.query<Winner, [number]>("SELECT * FROM winners WHERE season_id = ? ORDER BY replaced_at IS NOT NULL, board DESC, place, id").all(season.id);
   const b = season.snapshot_at ? boards(db, season, now) : null;
   const out = new Set(list.filter((w) => w.team === "excluded" || w.confirm === "expired").map((w) => w.player_id));
-  const reserve = b ? assignPrizes(b.points.map((r) => r.id), b.invites.map((r) => r.id), out).reserve : { points: [], invites: [] };
+  const reserve = b ? assignPrizes(...contenders(b), out).reserve : { points: [], invites: [] };
   const name = (id: number) => getPlayer(db, id)?.name ?? `#${id}`;
   return {
     season,
