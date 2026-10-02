@@ -39,6 +39,15 @@ export function seasonTick(db: Database, now: number) {
   if (season.snapshot_at && !season.paid_at) {
     db.query("UPDATE winners SET confirm = 'expired' WHERE season_id = ? AND confirm = 'waiting' AND replaced_at IS NULL AND deadline < ?").run(season.id, now);
     syncWinners(db, season, now);
+    markPaid(db, season, now);
+  }
+}
+
+// The season is paid once it is published and every winner on the list has a payout link.
+function markPaid(db: Database, season: Season, now: number) {
+  const list = activeWinners(db, season);
+  if (season.published_at && !season.paid_at && list.length && list.every((w) => w.tx_hash)) {
+    db.query("UPDATE seasons SET paid_at = ? WHERE id = ?").run(now, season.id);
   }
 }
 
@@ -66,6 +75,7 @@ export function syncWinners(db: Database, season: Season, now: number) {
     const b = boards(db, season, now, true);
     const { slots } = assignPrizes(b.points.map((r) => r.id), b.invites.map((r) => r.id), out);
     const active = activeWinners(db, season);
+    if (active.some((w) => w.tx_hash)) return; // payouts started: the list is fixed
     for (const s of slots) {
       const cur = active.find((w) => w.board === s.board && w.player_id === s.playerId);
       if (cur) {
@@ -153,7 +163,8 @@ export function teamCheck(db: Database, admin: string, season: Season, id: numbe
   needEnded(season);
   if (team !== "ok" && team !== "excluded") throw new GameError("Check is ok or excluded.");
   if (team === "excluded" && !reason.trim()) throw new GameError("Give the reason the player will see.");
-  if (getWinner(db, season, id).tx_hash) throw new GameError("This prize is already paid.", 409);
+  getWinner(db, season, id);
+  if (activeWinners(db, season).some((w) => w.tx_hash)) throw new GameError("Payouts have started; the list is fixed.", 409);
   db.query("UPDATE winners SET team = ?, reason = ? WHERE id = ?").run(team, team === "excluded" ? reason.trim() : null, id);
   log(db, admin, "winner-check", { id, team, reason }, now);
   syncWinners(db, season, now);
@@ -190,16 +201,18 @@ export const objectionsUntil = (s: Season) => (s.published_at ? s.published_at +
 export function recordPayout(db: Database, admin: string, season: Season, id: number, txHash: string, now: number) {
   if (!season.published_at) throw new GameError("Publish the list first.", 409);
   if (now < objectionsUntil(season)!) throw new GameError("Objections are still open.", 409);
-  if (db.query("SELECT 1 FROM appeals WHERE kind = 'objection' AND status = 'open'").get()) throw new GameError("Answer every objection before paying.", 409);
+  if (db.query("SELECT 1 FROM appeals WHERE kind = 'objection' AND status = 'open' AND at >= ?").get(season.published_at)) throw new GameError("Answer every objection before paying.", 409);
   if (!season.eth_rate) throw new GameError("Set the ETH rate of the payout day first.", 409);
   if (!/^0x[0-9a-fA-F]{64}$/.test(txHash)) throw new GameError("A transaction link needs a 0x hash of 64 characters.");
   const w = getWinner(db, season, id);
   if (w.tx_hash) throw new GameError("This prize is already paid.", 409);
   if (db.query("SELECT 1 FROM winners WHERE tx_hash = ?").get(txHash.toLowerCase())) throw new GameError("This transaction is already recorded for another prize.", 409);
   if (w.confirm !== "confirmed" || w.team !== "ok" || !w.sanctions_ok) throw new GameError("This winner is not ready for payout.", 409);
-  db.query("UPDATE winners SET tx_hash = ? WHERE id = ?").run(txHash.toLowerCase(), id);
-  log(db, admin, "payout", { id, txHash }, now);
-  if (activeWinners(db, season).every((x) => x.tx_hash)) db.query("UPDATE seasons SET paid_at = ? WHERE id = ?").run(now, season.id);
+  db.transaction(() => {
+    db.query("UPDATE winners SET tx_hash = ? WHERE id = ?").run(txHash.toLowerCase(), id);
+    log(db, admin, "payout", { id, txHash }, now);
+    markPaid(db, season, now);
+  }).immediate();
 }
 
 // After payouts: a new season. Points, corrections and counted friends start from zero; items stay.

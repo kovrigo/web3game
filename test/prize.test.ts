@@ -154,7 +154,11 @@ test("publish, objections, payout links, paid, next season", async () => {
   P.recordPayout(db, "bo", S(), w1!.id, hash, t);
   expect(() => P.setRate(db, "bo", S(), 3000, t)).toThrow("rate is fixed");
   expect(() => P.recordPayout(db, "bo", S(), w2!.id, hash.toUpperCase().replace("0X", "0x"), t)).toThrow("already recorded for another prize");
-  expect(() => P.teamCheck(db, "ana", S(), w1!.id, "excluded", "Late finding.", t)).toThrow("already paid");
+  expect(() => P.teamCheck(db, "ana", S(), w2!.id, "excluded", "Late finding.", t)).toThrow("the list is fixed");
+  // A correction after payouts started moves nobody.
+  db.query("UPDATE players SET wave_points = 5000 WHERE id = ?").run(b!);
+  P.seasonTick(db, t);
+  expect(P.activeWinners(db, S()).map((w) => [w.player_id, w.prize_usd])).toEqual([[a!, 700], [b!, 450]]);
   P.recordPayout(db, "bo", S(), w2!.id, `0x${"cd".repeat(32)}`, t);
   expect(phaseOf(S(), t)).toBe("paid");
   expect(P.myPrize(db, S(), a!)).toMatchObject({ status: "paid", txHash: hash, eth: 700 / 3200 });
