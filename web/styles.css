@@ -39,9 +39,9 @@ a { color: var(--text); text-underline-offset: 3px; }
 .btn-secondary { background: var(--raised); color: var(--text); border: 1px solid var(--border); }
 .btn:disabled { background: var(--surface); color: var(--muted); border: 1px solid var(--border); box-shadow: none; cursor: not-allowed; }
 .btn:disabled .mono { color: var(--text); }
-.ghost { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; padding: 0 4px; background: none; border: 0; color: var(--text); font: 600 .9375rem var(--body); text-decoration: underline; text-underline-offset: 3px; }
+.ghost { display: inline-flex; align-items: center; justify-content: center; min-height: 44px; min-width: 44px; padding: 0 4px; margin: 0 -4px; background: none; border: 0; color: var(--text); font: 600 .9375rem var(--body); text-decoration: underline; text-underline-offset: 3px; }
 .ghost:disabled { color: var(--muted); text-decoration: none; cursor: not-allowed; }
-.ghost.block { width: 100%; }
+.ghost.block { width: 100%; margin: 0; }
 .row-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 /* Table switch: a choice, not an action. Active side like the active tab. */
 .seg { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 4px; border-radius: 10px; background: var(--surface); }
