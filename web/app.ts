@@ -42,6 +42,12 @@ const short = (h: string) => `${h.slice(0, 4)}…${h.slice(-4)}`;
 const fmtDay = (ms: number) => fmtDate(ms);
 const fmtDayShort = (ms: number) => fmtDate(ms, false);
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
+// Reading screens put the local time next to a UTC boundary, unless they match.
+const localTime = (ms: number) => {
+  const d = new Date(ms);
+  if (d.getTimezoneOffset() === 0) return "";
+  return ` (${pad(d.getDate())} ${d.toLocaleDateString("en-US", { month: "short" })}, ${pad(d.getHours())}:${pad(d.getMinutes())} your time)`;
+};
 const clock = () => Date.now() + skew;
 const over = (phase: string) => phase === "ended" || phase === "published" || phase === "paid";
 let skew = 0;
@@ -650,7 +656,7 @@ function rulesScreen() {
     <a class="ghost back" href="#/${ui.session ? "hero" : "home"}">Back</a>
     <h1>Season rules</h1>
     <ul>
-      <li>Season One runs 4 weeks${s ? `, from ${fmtDay(s.start)} to ${fmtDay(s.end)}, 00:00 UTC` : ""}. Players must be 18 or older.</li>
+      <li>Season One runs 4 weeks${s ? `, from ${fmtDay(s.start)} to ${fmtDay(s.end)}, 00:00 UTC${localTime(s.end)}` : ""}. Players must be 18 or older.</li>
       <li>Season points have no money value. They are never exchanged for money or any coin, and no future handout is promised for them. The Founder badge promises nothing either.</li>
       <li>Nothing in the game costs money. Chests are free and their <a href="#/odds">odds</a> are public.</li>
       <li>Points come from waves (10 pts plus gear power each), plus 10% of the points of friends who counted, up to 50,000 pts a season. A friend counts after playing on 3 different days.</li>
@@ -729,7 +735,7 @@ function prizeScreen() {
   if (p.status === "no_prize") return `<main class="read">${head}${alertBox("warning", NO_PRIZE[0], NO_PRIZE[1])}</main>`;
   if (p.status === "waiting") {
     return `<main class="read">${head}
-      <p>Confirm by <b>${fmtDay(p.deadline)}, ${new Date(p.deadline).toISOString().slice(11, 16)} UTC</b>. Without it, the prize goes to the next player.</p>
+      <p>Confirm by <b>${fmtDay(p.deadline)}, ${new Date(p.deadline).toISOString().slice(11, 16)} UTC</b>${localTime(p.deadline)}. Without it, the prize goes to the next player.</p>
       ${p.wallet ? `<form class="stack" data-form="confirm">
         <label class="field"><span>Country you live in</span><input class="input" name="country" required autocomplete="country-name" maxlength="64"></label>
         <label class="field"><span>Payout address</span><input class="input mono" name="address" required value="${esc(p.wallet)}" autocomplete="off" spellcheck="false"></label>
