@@ -1,0 +1,133 @@
+import { afterAll, beforeAll, expect, test } from "bun:test";
+import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
+import { openDb } from "../src/db";
+import { verifyDay } from "../src/fair";
+import { DAY_MS, tick, type Season } from "../src/game";
+import { createApp } from "../src/server";
+import { dropBoardCache } from "../src/social";
+
+const START = Date.parse("2026-10-06T00:00:00Z");
+const season: Season = { start: START, end: START + 28 * DAY_MS };
+let clock = START + 10 * 3_600_000;
+const db = openDb(":memory:");
+const app = createApp({ db, season, env: { DEV_LOGIN: "1", ADMIN_TOKENS: "ana:k1,bo:k2" }, now: () => clock });
+let server: ReturnType<typeof Bun.serve>;
+let base = "";
+
+beforeAll(() => {
+  server = Bun.serve({ port: 0, routes: app.routes, fetch: () => new Response("Not found", { status: 404 }) });
+  app.attach(server);
+  base = server.url.origin;
+});
+afterAll(() => server.stop(true));
+
+async function call(path: string, data?: unknown, headers: Record<string, string> = {}) {
+  const res = await fetch(base + path, {
+    method: data === undefined ? "GET" : "POST",
+    headers: { "content-type": "application/json", ...headers },
+    body: data === undefined ? undefined : JSON.stringify(data),
+  });
+  return { status: res.status, body: (await res.json().catch(() => null)) as any, cookie: res.headers.get("set-cookie") ?? "" };
+}
+const sid = (setCookie: string) => ({ cookie: setCookie.split(";")[0]! });
+
+test("sign-in needs the 18+ box", async () => {
+  const r = await call("/api/auth/dev", { name: "nobox" });
+  expect(r.status).toBe(400);
+  expect(r.body.error).toContain("18 or older");
+});
+
+test("test sign-in, visit, daily chest once a day", async () => {
+  const s = sid((await call("/api/auth/dev", { name: "opener", accept: true, device: "d1" })).cookie);
+  const v = await call("/api/visit", { seed: "ab".repeat(16) }, s);
+  expect(v.status).toBe(200);
+  expect(v.body.today.seed).toBe("ab".repeat(16));
+  expect(v.body.season.phase).toBe("live");
+  const o = await call("/api/chest/open", { kind: "daily" }, s);
+  expect(o.status).toBe(200);
+  expect(o.body.roll.sealed).toBe(true);
+  const again = await call("/api/chest/open", { kind: "daily" }, s);
+  expect(again.status).toBe(409);
+  expect(again.body.error).toBe("Today's chest is already open.");
+});
+
+test("signed out gets the signed-out sentence", async () => {
+  const r = await call("/api/visit", {});
+  expect(r.status).toBe(401);
+  expect(r.body.error).toBe("Signed out. Sign in to continue.");
+});
+
+test("wallet sign-in with a signed message, a reused message fails", async () => {
+  const acct = privateKeyToAccount(generatePrivateKey()); // throwaway key, never funded
+  const { body } = await call("/api/auth/siwe/message", { address: acct.address });
+  const signature = await acct.signMessage({ message: body.message });
+  const ok = await call("/api/auth/siwe/verify", { message: body.message, signature, accept: true });
+  expect(ok.status).toBe(200);
+  expect(ok.body.player.needsName).toBe(true);
+  const reuse = await call("/api/auth/siwe/verify", { message: body.message, signature, accept: true });
+  expect(reuse.status).toBe(401);
+  const s = sid(ok.cookie);
+  expect((await call("/api/name", { name: "walletpal" }, s)).status).toBe(200);
+  expect((await call("/api/name", { name: "WALLETPAL" }, sid((await call("/api/auth/dev", { name: "other1", accept: true })).cookie))).status).toBe(409);
+});
+
+test("sealed receipt opens after the day ends and checks out", async () => {
+  const s = sid((await call("/api/auth/dev", { name: "checker", accept: true })).cookie);
+  await call("/api/visit", { seed: "cd".repeat(16) }, s);
+  const o = await call("/api/chest/open", { kind: "daily" }, s);
+  const day = o.body.roll.day;
+  expect((await call(`/api/fair/check/${day}`, undefined, s)).body.secret).toBeNull();
+  clock += DAY_MS;
+  tick(db, clock, season);
+  const c = await call(`/api/fair/check/${day}`, undefined, s);
+  expect(c.body.secret).toMatch(/^[0-9a-f]{64}$/);
+  const v = await verifyDay(c.body.secret, c.body.rolls, { commit: o.body.roll.commit, seeds: ["cd".repeat(16)] });
+  expect(v.ok).toBe(true);
+  expect((await call(`/api/roll/${o.body.roll.id}`)).body.sealed).toBe(false);
+});
+
+test("team review hides a player, appeal brings them back, every action logged by name", async () => {
+  const login = await call("/api/auth/dev", { name: "suspect", accept: true });
+  const s = sid(login.cookie);
+  await call("/api/visit", {}, s);
+  dropBoardCache();
+  expect((await call("/api/admin/queue")).status).toBe(401);
+  const id = login.body.player.id;
+  expect((await call("/api/admin/review", { playerId: id, status: "review", reason: "Shared connection" }, { authorization: "Bearer k1" })).status).toBe(200);
+  dropBoardCache();
+  const lb = await call("/api/leaderboard?board=points");
+  expect(lb.body.rows.some((r: any) => r.name === "suspect")).toBe(false);
+  const st = await call("/api/visit", {}, s);
+  expect(st.body.season.underReview).toBe(true);
+  expect((await call("/api/appeal", { email: "me@example.com", text: "I am one person." }, s)).status).toBe(200);
+  const appeals = (await call("/api/admin/appeals", undefined, { authorization: "Bearer k2" })).body;
+  await call("/api/admin/appeal", { id: appeals[0].id, status: "accepted", answer: "Sorry." }, { authorization: "Bearer k2" });
+  dropBoardCache();
+  expect((await call("/api/leaderboard?board=points")).body.rows.some((r: any) => r.name === "suspect")).toBe(true);
+  const log = db.query("SELECT admin, action FROM admin_log ORDER BY id").all();
+  expect(log).toEqual([{ admin: "ana", action: "review" }, { admin: "bo", action: "appeal" }]);
+});
+
+test("share card and receipt page for a rare roll", async () => {
+  // A rare roll row as the chest would write it (item 36 is a rare charm).
+  const pid = (db.query("SELECT id FROM players WHERE name = 'opener'").get() as { id: number }).id;
+  const row = db
+    .query("INSERT INTO rolls (player_id, kind, n, day, seed, commit_hash, streak, rarity, item_id, at) VALUES (?, 'guaranteed', 99, '2026-10-06', 'ab', 'cd', 0, 'rare', 36, ?) RETURNING id")
+    .get(pid, clock) as { id: number };
+  const page = await fetch(`${base}/r/${row.id}`);
+  expect(await page.text()).toContain('property="og:image"');
+  const png = await fetch(`${base}/card/${row.id}.png`);
+  expect(png.headers.get("content-type")).toBe("image/png");
+});
+
+test("invite link sets the cookie and the friend gets the referrer", async () => {
+  const host = await call("/api/auth/dev", { name: "hosty", accept: true });
+  const s = sid(host.cookie);
+  const code = (await call("/api/visit", {}, s)).body.friends.code;
+  const r = await fetch(`${base}/i/${code}?to=//evil.example`, { redirect: "manual" });
+  expect(r.headers.get("location")).toBe("/");
+  const inv = r.headers.get("set-cookie")!.split(";")[0]!;
+  const friend = await call("/api/auth/dev", { name: "guesty", accept: true }, { cookie: inv });
+  const ref = db.query("SELECT referrer_id FROM players WHERE id = ?").get(friend.body.player.id) as { referrer_id: number };
+  expect(ref.referrer_id).toBe(host.body.player.id);
+});

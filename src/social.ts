@@ -97,7 +97,7 @@ export function feed(db: Database, season: Season, limit = 20) {
   return db
     .query<RollRow, [number]>(
       `SELECT r.* FROM rolls r JOIN players p ON p.id = r.player_id
-       WHERE r.rarity IN ('rare', 'epic', 'legendary') AND p.review = 'ok' ORDER BY r.id DESC LIMIT ?`,
+       WHERE r.rarity IN ('rare', 'epic', 'legendary') AND p.review = 'ok' ORDER BY r.at DESC, r.id DESC LIMIT ?`,
     )
     .all(limit)
     .map((r) => rollView(db, season, r));
