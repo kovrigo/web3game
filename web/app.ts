@@ -904,8 +904,10 @@ async function loadRolls() {
 }
 
 async function refreshAll() {
-  const jobs: Promise<unknown>[] = [loadBoard("points"), loadFeed(), loadSeason()];
-  if (ui.session && !ui.session.needsName) jobs.push(loadState().catch(showError), api("/api/announcements").then((a) => (ui.announcements = a)));
+  // The visit credits waves first, so the table and the season bar show the same points.
+  const signedIn = ui.session && !ui.session.needsName;
+  const jobs: Promise<unknown>[] = [(signedIn ? loadState().catch(showError) : Promise.resolve()).then(() => loadBoard("points")), loadFeed(), loadSeason()];
+  if (signedIn) jobs.push(api("/api/announcements").then((a) => (ui.announcements = a)));
   await Promise.allSettled(jobs);
   render();
 }
