@@ -1,10 +1,10 @@
-# Spec: Season One, first version build (milestones 1 to 3)
+# Spec: Season One, first version build (milestones 1 to 4)
 
 Source of truth: `docs/designs/plan.md` (the Plan), `docs/designs/web3-game-brief.md` (the Brief, section "Дизайн" wins over the mockup), `docs/designs/stories.md`, `DESIGN.md`. Mockup option C "Scoreboard" is the visual reference, read only, never copied as is.
 
 ## Context
 
-Greenfield browser idle game. Server holds all game state. Chain is touched only by prize payouts (team, Safe UI) and winner transfers (player wallet). This spec covers Plan milestones 1 to 3: core loop, competition and growth, protection and metrics. Milestone 4 (season end, prize screen, transfer, winner email) and 5 (Privy email sign-in, country check) are out of this build.
+Greenfield browser idle game. Server holds all game state. Chain is touched only by prize payouts (team, Safe UI) and winner transfers (player wallet). This spec covers Plan milestones 1 to 4: core loop, competition and growth, protection and metrics, season end. Milestone 5 (Privy email sign-in, country check) waits for the Privy key and the closed-country list.
 
 ## Current state
 
@@ -116,6 +116,19 @@ Follow Brief section "Дизайн" item by item and `DESIGN.md` tokens. Key rul
 
 New app, no users. Rollback is not deploying. DB schema versioned with `user_version`.
 
+## Milestone 4: season end
+
+- Schema version 2: `seasons` (dates, `snapshot_at`, `published_at`, `paid_at`, `eth_rate`), `snapshots`, `winners`, `outbox`; `corrections.season_id`, `appeals.kind` (appeal | objection). `initSeason` inserts season 1 from `SEASON_START` once; the server reads the current season per request.
+- `src/prize.ts` `seasonTick` every minute: day reveal, then at the end `settleAll(end)` and `snapshot`; then expire unconfirmed rows past `deadline` and `syncWinners`.
+- `src/payout.ts` (shared with the browser): `assignPrizes` (one person one prize, bigger prize kept, points race on a tie, reserve of 10), `payoutMessage`, `amountAfterGas` (21,000 gas at a fixed gas price), `formatEth`.
+- Winner rows follow the player: a re-rank updates place and prize, keeps confirmation. First rows: deadline end + 7 days; later entrants: now + 3 days. Excluded and expired players stay out.
+- Confirmation: winner signs `payoutMessage` with the sign-in wallet; server verifies with `viem` and stores message and signature.
+- Team: check ok or exclude with reason, sanctions checked, ETH rate (fixed once a payout exists), publish (all rows confirmed, ok, sanctions checked), payout hash (after objections close, no open objection, rate set), next season (after paid; resets wave points, streaks, guarantee; items and roll numbers stay). Every action in `admin_log`.
+- Letters: winners with an email get a row in `outbox`, shown on the team page; Send stays disabled until an email service is chosen.
+- Routes: `GET /api/prize`, `POST /api/prize/confirm`, `GET /api/winners` (null until published), `POST /api/appeal {kind: "objection"}` only while objections are open, team routes `/api/admin/winners|winner-check|sanctions|rate|publish|payout|next-season`.
+- Transfer: browser wallet only; checks `CHAIN_ID`; sends balance minus exact fee. `EXCHANGES` env `Name|url,...`; empty list is stated on screen.
+- Test server (`DEV_LOGIN=1 MOCK_CHAIN=1`): in-memory mock chain (`src/devchain.ts`, `/api/dev/chain`, `/dev/explorer`), throwaway browser wallet, seeded players on the public Hardhat test mnemonic, team shortcuts (`/api/admin/dev`: end-now, prepare-test-winners, close-objections, pay-all). All 404 elsewhere.
+
 ## Out of scope
 
-Plan milestones 4 and 5, item upgrades, websockets, automatic sanctions screening, deploy.
+Plan milestone 5, item upgrades, websockets, automatic sanctions screening, deploy.
