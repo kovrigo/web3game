@@ -3,6 +3,8 @@ import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { openDb } from "../src/db";
 import { verifyDay } from "../src/fair";
 import { DAY_MS, initSeason, tick } from "../src/game";
+import { payoutMessage } from "../src/payout";
+import { seasonTick } from "../src/prize";
 import { createApp } from "../src/server";
 import { dropBoardCache } from "../src/social";
 
@@ -130,4 +132,24 @@ test("invite link sets the cookie and the friend gets the referrer", async () =>
   const friend = await call("/api/auth/dev", { name: "guesty", accept: true }, { cookie: inv });
   const ref = db.query("SELECT referrer_id FROM players WHERE id = ?").get(friend.body.player.id) as { referrer_id: number };
   expect(ref.referrer_id).toBe(host.body.player.id);
+});
+
+test("season end over HTTP: prize confirm by signature, winners hidden until published, test-only routes closed", async () => {
+  const acct = privateKeyToAccount(generatePrivateKey()); // throwaway key, never funded
+  const { body } = await call("/api/auth/siwe/message", { address: acct.address });
+  const login = await call("/api/auth/siwe/verify", { message: body.message, signature: await acct.signMessage({ message: body.message }), accept: true });
+  const s = sid(login.cookie);
+  await call("/api/name", { name: "champ" }, s);
+  db.query("UPDATE players SET wave_points = 999999 WHERE name = 'champ'").run();
+  clock = season.end + 60_000;
+  seasonTick(db, clock);
+  const prize = (await call("/api/prize", undefined, s)).body;
+  expect(prize).toMatchObject({ board: "points", place: 1, prize: 700, status: "waiting" });
+  expect((await call("/api/winners")).body).toBeNull();
+  const message = payoutMessage({ seasonId: prize.seasonId, playerId: prize.playerId, name: "champ", country: "Portugal", address: acct.address });
+  const ok = await call("/api/prize/confirm", { country: "Portugal", address: acct.address, signature: await acct.signMessage({ message }) }, s);
+  expect(ok.body.status).toBe("confirmed");
+  expect((await call("/api/appeal", { email: "c@example.com", text: "Objection before publish.", kind: "objection" }, s)).status).toBe(409);
+  expect((await call("/api/dev/chain", { method: "eth_chainId" })).status).toBe(404);
+  expect((await call("/api/admin/dev", { action: "end-now" }, { authorization: "Bearer k1" })).status).toBe(404);
 });

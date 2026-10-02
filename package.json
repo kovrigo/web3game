@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "DEV_LOGIN=1 DB_PATH=data/dev.sqlite SEASON_START=2026-09-29T00:00:00Z ADMIN_TOKENS=team:season-one-dev bun --hot src/server.ts",
+    "dev": "DEV_LOGIN=1 MOCK_CHAIN=1 EXPLORER_URL=/dev/explorer DB_PATH=data/dev.sqlite SEASON_START=2026-09-29T00:00:00Z ADMIN_TOKENS=team:season-one-dev bun --hot src/server.ts",
     "seed:dev": "DEV_LOGIN=1 DB_PATH=data/dev.sqlite SEASON_START=2026-09-29T00:00:00Z bun scripts/dev-seed.ts",
     "start": "bun src/server.ts",
     "test": "bun test"

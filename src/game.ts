@@ -95,13 +95,18 @@ function equipIfBetter(db: Database, playerId: number, itemId: number, rollId: n
   );
 }
 
+const warned = new Set<string>();
+
 // One roll. Returns null when the day has no secret or the player has no seed yet.
 function roll(db: Database, playerId: number, kind: C.RollKind, n: number, at: number, streak: number): RollRow | null {
   const day = dayOf(at);
   const fd = fairDay(db, day);
   const seed = seedAt(db, playerId, at);
   if (!fd || !seed) {
-    if (!fd) console.warn(`no secret for ${day}: ${kind} ${n} of player ${playerId} not rolled`);
+    if (!fd && !warned.has(day)) {
+      warned.add(day);
+      console.warn(`no secret for ${day}: rolls of that day are skipped`);
+    }
     return null;
   }
   const h = new Uint8Array(createHmac("sha256", Buffer.from(fd.secret, "hex")).update(rollMessage(seed.seed, kind, n)).digest());

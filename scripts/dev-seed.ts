@@ -4,6 +4,7 @@ import { randomBytes } from "node:crypto";
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { findOrCreate } from "../src/auth";
+import { testAccount } from "../src/devtools";
 import { openDb } from "../src/db";
 import { DAY_MS, dayOf, ensureDays, initSeason, openChest, setSeed, visit } from "../src/game";
 
@@ -17,7 +18,7 @@ const names = ["mara.eth", "Quillbane", "ottoTheLantern", "sable_wave", "Henriet
 let host = 0;
 for (const [i, name] of names.entries()) {
   const start = now - (2 + (i % 6)) * 3_600_000;
-  const id = findOrCreate(db, { name, invite: i > 6 && host ? (db.query("SELECT invite_code FROM players WHERE id = ?").get(host) as any).invite_code : undefined }, start);
+  const id = findOrCreate(db, { name, wallet: testAccount(i).address, invite: i > 6 && host ? (db.query("SELECT invite_code FROM players WHERE id = ?").get(host) as any).invite_code : undefined }, start);
   if (i === 0) host = id;
   setSeed(db, id, randomBytes(16).toString("hex"), start);
   for (let d = 1; d <= (i % 4); d++) db.query("INSERT OR IGNORE INTO active_days (player_id, day) VALUES (?, ?)").run(id, dayOf(now - d * DAY_MS));

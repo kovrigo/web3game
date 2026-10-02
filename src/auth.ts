@@ -33,7 +33,8 @@ export function findOrCreate(db: Database, who: NewPlayer, now: number): number 
     ? db.query<{ id: number }, [string]>("SELECT id FROM players WHERE wallet = ?").get(who.wallet)
     : who.email
       ? db.query<{ id: number }, [string]>("SELECT id FROM players WHERE email = ?").get(who.email)
-      : db.query<{ id: number }, [string]>("SELECT id FROM players WHERE name = ? AND wallet IS NULL AND email IS NULL").get(who.name ?? "");
+      : // Test sign-in only (DEV_LOGIN=1): the name is the account, even after the test wallet is attached.
+        db.query<{ id: number }, [string]>("SELECT id FROM players WHERE name = ?").get(who.name ?? "");
   if (found) return found.id;
   const ref = who.invite
     ? db.query<{ id: number }, [string]>("SELECT id FROM players WHERE invite_code = ?").get(who.invite)?.id ?? null

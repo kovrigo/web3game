@@ -11,6 +11,7 @@ import * as C from "./config";
 import { openDb } from "./db";
 import { getAddress, isAddress } from "viem";
 import * as chain from "./devchain";
+import { devAction } from "./devtools";
 import { currentSeason, dayOf, ensureDays, fairDay, GameError, getPlayer, initSeason, openChest, phaseOf, setSeed, visit, type RollRow } from "./game";
 import * as P from "./prize";
 import { boards, buildState, dropBoardCache, feed, nameError, rollView, standing } from "./social";
@@ -357,15 +358,11 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     "/api/admin/rate": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.setRate(db, a, S(), Number(b.rate), now()); return {}; }) },
     "/api/admin/publish": { POST: h(async (req) => { const a = admin(req); P.publish(db, a, S(), now()); return {}; }) },
     "/api/admin/payout": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.recordPayout(db, a, S(), Number(b.id), String(b.txHash ?? ""), now()); return {}; }) },
-    "/api/admin/mock-pay": {
+    "/api/admin/dev": {
       POST: h(async (req) => {
         const a = admin(req);
         if (!mock) throw new GameError("Not found.", 404);
-        const id = Number((await body(req)).id);
-        const w = P.activeWinners(db, S()).find((x) => x.id === id);
-        if (!w?.address || !S().eth_rate) throw new GameError("Winner address and ETH rate are needed.", 409);
-        const wei = BigInt(Math.round((w.prize_usd / S().eth_rate!) * 1e9)) * 10n ** 9n;
-        P.recordPayout(db, a, S(), id, chain.credit(w.address, wei, now()), now());
+        await devAction(db, a, String((await body(req)).action), now());
         return {};
       }),
     },
