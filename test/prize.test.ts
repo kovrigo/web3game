@@ -248,6 +248,6 @@ test("accepted dispute after the prize was paid on: no prize left, the team sees
   P.recordPayout(db, "bo", S(), P.activeWinners(db, S())[0]!.id, `0x${"ef".repeat(32)}`, paidAt);
   accept(a!, paidAt + DAY_MS);
   expect(P.myPrize(db, S(), a!)!.status).toBe("no_prize");
-  expect(P.activeWinners(db, S()).map((w) => w.player_id)).toEqual([b]);
+  expect(P.activeWinners(db, S()).map((w) => w.player_id)).toEqual([b!]);
   expect(P.teamView(db, S(), paidAt + DAY_MS).winners.find((w) => w.player_id === a)).toMatchObject({ no_prize: 1 });
 });
