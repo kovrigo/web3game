@@ -344,6 +344,12 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       if (!r || !r.rarity || r.item_id === null) return new Response("Not found", { status: 404 });
       let c = cards.get(r.id);
       if (!c || now() - c.at > 300_000) {
+        // A render blocks the server for about 10 ms: one address may not render cards in bulk.
+        try {
+          rateLimit(`card:${ip(req)}`, 300, 600_000, now());
+        } catch {
+          return new Response("Too many cards. Wait a few minutes.", { status: 429 });
+        }
         const v = rollView(db, S(), r);
         const link = `${new URL(origin(req)).host}/i/${v.player.invite}`;
         c = { at: now(), png: new Uint8Array(cardPng({ player: v.player.name, founder: v.player.founder, item: v.item!.name, rarity: r.rarity, link, roll: `${r.kind} #${r.n} · ${fmtDay(r.day)}` })) };

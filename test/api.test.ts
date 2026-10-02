@@ -224,3 +224,17 @@ test("real server refuses plain http; the test seed refuses a real database", as
   expect(seed.code).not.toBe(0);
   expect(seed.err).toContain("DB_PATH with 'dev'");
 });
+
+test("one address renders at most 300 share cards in 10 minutes", async () => {
+  clock += 600_001;
+  const pid = db.query<{ id: number }, []>("SELECT id FROM players LIMIT 1").get()!.id;
+  const ins = db.query<{ id: number }, [number, number, number]>(
+    "INSERT INTO rolls (player_id, kind, n, day, seed, commit_hash, streak, rarity, item_id, at) VALUES (?, 'find', ?, '2026-10-06', 'ab', 'cd', 0, 'common', 0, ?) RETURNING id",
+  );
+  const ids = Array.from({ length: 301 }, (_, i) => ins.get(pid, 1_000_000 + i * 10, clock)!.id);
+  const codes: number[] = [];
+  for (const id of ids) codes.push((await fetch(`${base}/card/${id}.png`)).status);
+  expect(codes.slice(0, 300).every((c) => c === 200)).toBe(true);
+  expect(codes[300]).toBe(429);
+  expect((await fetch(`${base}/card/${ids[0]}.png`)).status).toBe(200); // cached cards still load
+});
