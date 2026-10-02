@@ -80,7 +80,7 @@ Repo holds docs only (`DESIGN.md`, `CLAUDE.md`, `docs/designs/*`). No code, no `
 - `POST /api/name {name}`.
 - `POST /api/visit {seed}`: marks active day, stores seed, settles waves, returns `State`.
 - `State`: `{now, day, season:{phase,start,end,rank,points,underReview}, player:{name,hidden,founder,activeDays}, away:{waves,points,finds:[Roll]}, hero:{wave,power,gear:[{slot,item:Item|null}]}, chests:{dailyOpen:boolean,nextDailyAt,waiting:[{id,kind}]}, streak:{value}, guarantee:{days,need}, friends:{code,list:[{name,days,counted}],refPoints,cap}, today:{commit,seed}, review:{status,appeal:{status}|null}}`.
-- `POST /api/chest/open {kind: "daily" | "guaranteed"}` returns `{roll: Roll, reel: [Item], state: State}`. Reel frames come from the same odds table via `crypto.getRandomValues`, result at a fixed index; no legendary placed next to the result unless drawn.
+- `POST /api/chest/open {kind: "daily" | "guaranteed"}` returns `{roll: Roll, state: State}`. The browser builds the reel frames from the published odds of that chest with `crypto.getRandomValues`, result at a fixed index; nothing is placed next to the result on purpose.
 - `Roll`: `{id, kind, n, day, seed, commit, rarity, item, sealed, createdAt, player:{name|"Hidden player", founder}}`.
 - `GET /api/rolls?day=YYYY-MM-DD`: own rolls of that day; default newest 50.
 - `GET /api/roll/:id` public receipt.
@@ -110,6 +110,7 @@ Follow Brief section "Дизайн" item by item and `DESIGN.md` tokens. Key rul
 - Unit: `test/fair.test.ts`, `test/game.test.ts`, `test/social.test.ts`.
 - API: `test/api.test.ts` against `Bun.serve` on port 0 with `:memory:` DB and `DEV_LOGIN=1`.
 - Visual: screenshots through `paneweb` at 390, 320, 1280 px.
+- Test data: `bun run seed:dev` fills `data/dev.sqlite` with 12 players who played today. Refuses without `DEV_LOGIN=1`.
 
 ## Rollback
 
