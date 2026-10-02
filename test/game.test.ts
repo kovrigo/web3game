@@ -3,17 +3,18 @@ import type { Database } from "bun:sqlite";
 import { createHash } from "node:crypto";
 import { findOrCreate } from "../src/auth";
 import { openDb } from "../src/db";
-import { DAY_MS, dayOf, ensureDays, getPlayer, nextStreak, openChest, phaseOf, settle, tick, visit, type Season } from "../src/game";
+import { DAY_MS, dayOf, ensureDays, getPlayer, initSeason, nextStreak, openChest, phaseOf, settle, tick, visit, type Season } from "../src/game";
 import { boards, buildState, dropBoardCache, friendsOf, nameError } from "../src/social";
 import { addCorrection, resolveAppeal, setReview, submitAppeal } from "../src/admin";
 
 const START = Date.parse("2026-10-06T00:00:00Z");
-const season: Season = { start: START, end: START + 28 * DAY_MS };
+let season: Season;
 const H = 3_600_000;
 let db: Database;
 
 beforeEach(() => {
   db = openDb(":memory:");
+  season = initSeason(db, START);
   dropBoardCache();
 });
 
@@ -159,7 +160,7 @@ test("review hides a player from tables, an accepted appeal brings every point b
 
 test("corrections change points and are announced", () => {
   const a = join("fixme", START);
-  addCorrection(db, "t", a, -200, "Used a wave counter bug.", START);
+  addCorrection(db, "t", season, a, -200, "Used a wave counter bug.", START);
   expect(boards(db, season, START, true).points[0]!.points).toBe(-200);
   expect((db.query("SELECT text FROM announcements").get() as { text: string }).text).toContain("-200 pts");
 });

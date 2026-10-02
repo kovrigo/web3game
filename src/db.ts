@@ -60,17 +60,55 @@ CREATE TABLE admin_log (id INTEGER PRIMARY KEY, admin TEXT NOT NULL, action TEXT
 CREATE TABLE season_marks (key TEXT PRIMARY KEY, at INTEGER NOT NULL);
 `;
 
+// Version 2: seasons in the database, season end, winners, payouts, letters.
+const SEASON_END = `
+CREATE TABLE seasons (
+  id INTEGER PRIMARY KEY,
+  start INTEGER NOT NULL,
+  end INTEGER NOT NULL,
+  snapshot_at INTEGER,                        -- boards frozen and saved
+  published_at INTEGER,                       -- winners list public; objections for 3 days
+  paid_at INTEGER,
+  eth_rate REAL                               -- dollars per ETH on the payout day, set by the team
+);
+ALTER TABLE corrections ADD COLUMN season_id INTEGER NOT NULL DEFAULT 1;
+ALTER TABLE appeals ADD COLUMN kind TEXT NOT NULL DEFAULT 'appeal';   -- appeal | objection
+CREATE TABLE snapshots (season_id INTEGER NOT NULL, board TEXT NOT NULL, place INTEGER NOT NULL, player_id INTEGER NOT NULL, value INTEGER NOT NULL, PRIMARY KEY (season_id, board, place));
+CREATE TABLE winners (
+  id INTEGER PRIMARY KEY,
+  season_id INTEGER NOT NULL,
+  board TEXT NOT NULL,                        -- points | invites
+  place INTEGER NOT NULL,
+  player_id INTEGER NOT NULL REFERENCES players(id),
+  prize_usd INTEGER NOT NULL,
+  deadline INTEGER NOT NULL,                  -- confirm country and address by then
+  confirm TEXT NOT NULL DEFAULT 'waiting',    -- waiting | confirmed | expired
+  team TEXT NOT NULL DEFAULT 'pending',       -- pending | ok | excluded
+  reason TEXT,
+  country TEXT,
+  address TEXT,
+  message TEXT,
+  signature TEXT,
+  confirmed_at INTEGER,
+  sanctions_ok INTEGER NOT NULL DEFAULT 0,
+  tx_hash TEXT,
+  replaced_at INTEGER,                        -- no longer on the list
+  created_at INTEGER NOT NULL
+);
+DROP TABLE season_marks;
+CREATE TABLE outbox (id INTEGER PRIMARY KEY, season_id INTEGER NOT NULL, player_id INTEGER NOT NULL, to_email TEXT NOT NULL, subject TEXT NOT NULL, body TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'waiting', created_at INTEGER NOT NULL, sent_at INTEGER);
+`;
+
 export function openDb(path: string): Database {
   const db = new Database(path, { create: true, strict: true });
   db.run("PRAGMA journal_mode = WAL");
   db.run("PRAGMA foreign_keys = ON");
   db.run("PRAGMA busy_timeout = 5000");
   const v = db.query<{ user_version: number }, []>("PRAGMA user_version").get()!.user_version;
-  if (v === 0) {
-    db.transaction(() => {
-      db.run(SCHEMA);
-      db.run("PRAGMA user_version = 1");
-    })();
-  }
+  db.transaction(() => {
+    if (v < 1) db.run(SCHEMA);
+    if (v < 2) db.run(SEASON_END);
+    db.run("PRAGMA user_version = 2");
+  })();
   return db;
 }

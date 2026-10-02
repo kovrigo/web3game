@@ -2,15 +2,15 @@ import { afterAll, beforeAll, expect, test } from "bun:test";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { openDb } from "../src/db";
 import { verifyDay } from "../src/fair";
-import { DAY_MS, tick, type Season } from "../src/game";
+import { DAY_MS, initSeason, tick } from "../src/game";
 import { createApp } from "../src/server";
 import { dropBoardCache } from "../src/social";
 
 const START = Date.parse("2026-10-06T00:00:00Z");
-const season: Season = { start: START, end: START + 28 * DAY_MS };
 let clock = START + 10 * 3_600_000;
 const db = openDb(":memory:");
-const app = createApp({ db, season, env: { DEV_LOGIN: "1", ADMIN_TOKENS: "ana:k1,bo:k2" }, now: () => clock });
+const season = initSeason(db, START);
+const app = createApp({ db, env: { DEV_LOGIN: "1", ADMIN_TOKENS: "ana:k1,bo:k2" }, now: () => clock });
 let server: ReturnType<typeof Bun.serve>;
 let base = "";
 

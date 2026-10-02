@@ -40,11 +40,14 @@ export function setReview(db: Database, admin: string, playerId: number, status:
   dropBoardCache();
 }
 
-export function submitAppeal(db: Database, playerId: number, email: string, text: string, now: number) {
+// An appeal disputes a review; an objection disputes the published winners list.
+export function submitAppeal(db: Database, playerId: number, email: string, text: string, now: number, kind: "appeal" | "objection" = "appeal") {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError("Enter an email we can answer to.");
   if (text.trim().length < 10) throw new GameError("Tell us a bit more, at least 10 characters.");
-  if (db.query("SELECT 1 FROM appeals WHERE player_id = ? AND status = 'open'").get(playerId)) throw new GameError("Your appeal is already with the team.", 409);
-  db.query("INSERT INTO appeals (player_id, email, text, at) VALUES (?, ?, ?, ?)").run(playerId, email.trim(), text.trim().slice(0, 2000), now);
+  if (db.query("SELECT 1 FROM appeals WHERE player_id = ? AND status = 'open' AND kind = ?").get(playerId, kind)) {
+    throw new GameError(kind === "appeal" ? "Your appeal is already with the team." : "Your objection is already with the team.", 409);
+  }
+  db.query("INSERT INTO appeals (player_id, email, text, at, kind) VALUES (?, ?, ?, ?, ?)").run(playerId, email.trim(), text.trim().slice(0, 2000), now, kind);
 }
 
 export const appeals = (db: Database) =>
@@ -53,21 +56,21 @@ export const appeals = (db: Database) =>
 // An accepted appeal returns the player to the tables with every point: points were never removed.
 export function resolveAppeal(db: Database, admin: string, id: number, status: string, answer: string, now: number) {
   if (status !== "accepted" && status !== "rejected") throw new GameError("Status is accepted or rejected.");
-  const a = db.query<{ player_id: number }, [string, string, number, number]>(
-    "UPDATE appeals SET status = ?, answer = ?, resolved_at = ? WHERE id = ? AND status = 'open' RETURNING player_id",
+  const a = db.query<{ player_id: number; kind: string }, [string, string, number, number]>(
+    "UPDATE appeals SET status = ?, answer = ?, resolved_at = ? WHERE id = ? AND status = 'open' RETURNING player_id, kind",
   ).get(status, answer.trim(), now, id);
   if (!a) throw new GameError("No open appeal with that id.", 404);
-  if (status === "accepted") db.query("UPDATE players SET review = 'ok', review_reason = NULL WHERE id = ?").run(a.player_id);
+  if (status === "accepted" && a.kind === "appeal") db.query("UPDATE players SET review = 'ok', review_reason = NULL WHERE id = ?").run(a.player_id);
   log(db, admin, "appeal", { id, status, answer }, now);
   dropBoardCache();
 }
 
-export function addCorrection(db: Database, admin: string, playerId: number, delta: number, reason: string, now: number) {
+export function addCorrection(db: Database, admin: string, season: Season, playerId: number, delta: number, reason: string, now: number) {
   if (!Number.isInteger(delta) || delta === 0) throw new GameError("Change must be a whole number, not zero.");
   if (!reason.trim()) throw new GameError("Give the reason that will be announced.");
   const p = db.query<{ name: string }, [number]>("SELECT name FROM players WHERE id = ?").get(playerId);
   if (!p) throw new GameError("No such player.", 404);
-  db.query("INSERT INTO corrections (player_id, delta, reason, at) VALUES (?, ?, ?, ?)").run(playerId, delta, reason.trim(), now);
+  db.query("INSERT INTO corrections (player_id, delta, reason, at, season_id) VALUES (?, ?, ?, ?, ?)").run(playerId, delta, reason.trim(), now, season.id);
   db.query("INSERT INTO announcements (text, at) VALUES (?, ?)").run(
     `Score correction: ${p.name ?? "a player"} ${delta > 0 ? "+" : ""}${delta.toLocaleString("en-US")} pts. ${reason.trim()}`, now,
   );

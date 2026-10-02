@@ -5,12 +5,12 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { findOrCreate } from "../src/auth";
 import { openDb } from "../src/db";
-import { DAY_MS, dayOf, ensureDays, openChest, seasonFromEnv, setSeed, visit } from "../src/game";
+import { DAY_MS, dayOf, ensureDays, initSeason, openChest, setSeed, visit } from "../src/game";
 
 if (process.env.DEV_LOGIN !== "1" || !process.env.DB_PATH) throw new Error("Test servers only: set DEV_LOGIN=1 and DB_PATH.");
 mkdirSync(dirname(process.env.DB_PATH), { recursive: true });
 const db = openDb(process.env.DB_PATH);
-const season = seasonFromEnv(process.env);
+const season = initSeason(db, Date.parse(process.env.SEASON_START ?? ""));
 const now = Date.now();
 ensureDays(db, now);
 const names = ["mara.eth", "Quillbane", "ottoTheLantern", "sable_wave", "Henrietta_LongWatch", "Pellucid", "kettle_crow", "Wren", "grimsby", "tidewalker", "Bartholomew.Maps", "nyx-07"];

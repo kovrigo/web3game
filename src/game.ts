@@ -4,8 +4,11 @@ import * as C from "./config";
 import { pick, rollMessage } from "./fair";
 import { ITEMS } from "./items";
 
-export type Season = { start: number; end: number };
-export type Phase = "upcoming" | "live" | "final_day" | "ended";
+export type Season = {
+  id: number; start: number; end: number;
+  snapshot_at: number | null; published_at: number | null; paid_at: number | null; eth_rate: number | null;
+};
+export type Phase = "upcoming" | "live" | "final_day" | "ended" | "published" | "paid";
 export type Player = {
   id: number; name: string | null; wallet: string | null; email: string | null; hidden: number;
   referrer_id: number | null; invite_code: string; review: string; review_reason: string | null;
@@ -30,16 +33,21 @@ const AWAY_GAP_MS = 15 * 60_000;
 export const dayOf = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 export const dayStart = (day: string) => Date.parse(`${day}T00:00:00Z`);
 
-export function seasonFromEnv(env: Record<string, string | undefined>): Season {
-  const start = Date.parse(env.SEASON_START ?? "2026-10-06T00:00:00Z");
-  if (Number.isNaN(start)) throw new Error(`SEASON_START is not a date: ${env.SEASON_START}`);
-  return { start, end: start + C.SEASON_DAYS * DAY_MS };
+export const currentSeason = (db: Database) =>
+  db.query<Season, []>("SELECT * FROM seasons ORDER BY id DESC LIMIT 1").get();
+export const firstSeason = (db: Database) => db.query<Season, []>("SELECT * FROM seasons ORDER BY id LIMIT 1").get();
+
+// The first season comes from SEASON_START once; later seasons are started by the team.
+export function initSeason(db: Database, start: number): Season {
+  if (Number.isNaN(start)) throw new Error("SEASON_START is not a date.");
+  if (!currentSeason(db)) db.query("INSERT INTO seasons (start, end) VALUES (?, ?)").run(start, start + C.SEASON_DAYS * DAY_MS);
+  return currentSeason(db)!;
 }
 
 export function phaseOf(s: Season, now: number): Phase {
   if (now < s.start) return "upcoming";
-  if (now >= s.end) return "ended";
-  return now >= s.end - DAY_MS ? "final_day" : "live";
+  if (now < s.end) return now >= s.end - DAY_MS ? "final_day" : "live";
+  return s.paid_at ? "paid" : s.published_at ? "published" : "ended";
 }
 const running = (s: Season, now: number) => now >= s.start && now < s.end;
 
@@ -201,7 +209,7 @@ export function settleAll(db: Database, at: number, season: Season) {
 }
 
 // Runs every minute: settle every player up to each finished day, then reveal it;
-// at the season end, settle everyone up to the end once.
+// at the season end, settle everyone up to the end.
 export function tick(db: Database, now: number, season: Season) {
   ensureDays(db, now);
   const today = dayOf(now);
@@ -212,8 +220,7 @@ export function tick(db: Database, now: number, season: Season) {
     settleAll(db, dayStart(day) + DAY_MS, season);
     db.query("UPDATE fair_days SET revealed_at = ? WHERE day = ?").run(now, day);
   }
-  if (now >= season.end && !db.query("SELECT 1 FROM season_marks WHERE key = 'end_settled'").get()) {
-    settleAll(db, season.end, season);
-    db.query("INSERT INTO season_marks (key, at) VALUES ('end_settled', ?)").run(now);
+  if (now >= season.end && !season.snapshot_at) {
+    settleAll(db, season.end, season); // the season-end step in prize.ts then saves the snapshot
   }
 }
