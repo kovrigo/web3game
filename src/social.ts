@@ -16,12 +16,12 @@ const eday = (s: Pick<Season, "end">) => dayOf(s.end - 1);
 // The Founder badge belongs to the first season only.
 const founderWindow = (db: Database, s: Season) => firstSeason(db) ?? s;
 
-export type BoardRow = { id: number; name: string; founder: boolean; points: number; invites: number };
+export type BoardRow = { id: number; name: string; hidden: boolean; founder: boolean; points: number; invites: number };
 
 // Points = waves + capped share of counted friends + corrections. Players under review are left out.
 function computeBoards(db: Database, season: Season) {
   const rows = db
-    .query<Omit<BoardRow, "founder"> & { founder: number }, any>(
+    .query<Omit<BoardRow, "founder" | "hidden"> & { founder: number; hidden: number }, any>(
       `WITH counted AS (
          SELECT f.referrer_id AS rid, f.wave_points AS pts FROM players f
          WHERE f.referrer_id IS NOT NULL AND f.review = 'ok'
@@ -29,7 +29,7 @@ function computeBoards(db: Database, season: Season) {
        ),
        ref AS (SELECT rid, COUNT(*) AS n, SUM(pts) AS s FROM counted GROUP BY rid),
        corr AS (SELECT player_id, SUM(delta) AS d FROM corrections WHERE season_id = $sid GROUP BY player_id)
-       SELECT p.id, p.name,
+       SELECT p.id, p.name, p.hidden,
          p.wave_points + min($cap, CAST(COALESCE(ref.s, 0) * $share AS INTEGER)) + COALESCE(corr.d, 0) AS points,
          COALESCE(ref.n, 0) AS invites,
          (SELECT COUNT(*) FROM active_days a WHERE a.player_id = p.id AND a.day BETWEEN $fsday AND $feday) >= $fdays AS founder
@@ -40,7 +40,7 @@ function computeBoards(db: Database, season: Season) {
       sday: sday(season), eday: eday(season), sid: season.id, need: C.INVITE_DAYS, cap: C.REF_CAP, share: C.REF_SHARE,
       fsday: sday(founderWindow(db, season)), feday: eday(founderWindow(db, season)), fdays: C.FOUNDER_DAYS,
     })
-    .map((r) => ({ ...r, founder: !!r.founder }));
+    .map((r) => ({ ...r, hidden: !!r.hidden, founder: !!r.founder }));
   // Ties: earlier sign-up first (lower id).
   const points = [...rows].sort((a, b) => b.points - a.points || a.id - b.id);
   const invites = rows.filter((r) => r.invites > 0).sort((a, b) => b.invites - a.invites || a.id - b.id);

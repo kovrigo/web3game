@@ -178,6 +178,18 @@ test("real server: every test-only route is 404, team routes too without team ke
   }
 });
 
+test("hidden name shows as Hidden player on the leaderboard, except to the player", async () => {
+  dropBoardCache();
+  const s = sid((await call("/api/auth/dev", { name: "shyone", accept: true })).cookie);
+  await call("/api/visit", {}, s);
+  expect((await call("/api/settings", { hidden: true }, s)).status).toBe(200);
+  dropBoardCache();
+  const names = (r: any) => r.body.rows.map((x: any) => x.name);
+  expect(names(await call("/api/leaderboard?board=points"))).not.toContain("shyone");
+  expect(names(await call("/api/leaderboard?board=points"))).toContain("Hidden player");
+  expect(names(await call("/api/leaderboard?board=points", undefined, s))).toContain("shyone");
+});
+
 test("every team route needs a team key", async () => {
   clock += 600_001; // fresh rate-limit window
   for (const path of ["queue", "appeals", "metrics", "winners"]) expect((await call(`/api/admin/${path}`)).status).toBe(401);

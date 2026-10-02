@@ -259,7 +259,8 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       const mine = id ? standing(db, S(), t, id, board) : null;
       return {
         board, total: list.length, places: C.PRIZES[board].length,
-        rows: list.slice(0, 50).map((r, i) => ({ rank: i + 1, name: r.name, founder: r.founder, points: r.points, invites: r.invites, me: r.id === id })),
+        // A hidden name shows as "Hidden player" to everyone else; the winners list keeps real names.
+        rows: list.slice(0, 50).map((r, i) => ({ rank: i + 1, name: r.hidden && r.id !== id ? "Hidden player" : r.name, founder: r.founder, points: r.points, invites: r.invites, me: r.id === id })),
         me: mine?.row ? { rank: mine.rank, name: mine.row.name, founder: mine.row.founder, points: mine.row.points, invites: mine.row.invites, gap: mine.gap } : null,
       };
     }),

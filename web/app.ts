@@ -388,7 +388,7 @@ function heroTab() {
     </section>
     <section class="section"><div class="head"><h2 class="title">Account</h2></div>
       <div class="list-row"><span class="trunc">${esc(s.player.name)} ${founderChip(s.player.founder)}</span><span></span></div>
-      <label class="check"><input type="checkbox" data-act="hidden" ${s.player.hidden ? "checked" : ""} data-mut><span>Hide my name in the live feed and on share cards</span></label>
+      <label class="check"><input type="checkbox" data-act="hidden" ${s.player.hidden ? "checked" : ""} data-mut><span>Hide my name in the live feed, on share cards and in the tables. The winners list always shows real names.</span></label>
       <p class="land-links small"><a href="#/rules">Season rules</a><a href="#/odds">Odds</a><a href="#/fair">How we can't rig it</a><button class="ghost" data-act="logout">Sign out</button></p>
     </section>`;
 }
