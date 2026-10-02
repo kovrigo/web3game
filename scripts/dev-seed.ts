@@ -9,9 +9,10 @@ import { openDb } from "../src/db";
 import { DAY_MS, dayOf, ensureDays, initSeason, openChest, setSeed, visit } from "../src/game";
 
 // Seeded players use the public test wallets: anyone could sign as them on a real database.
-if (process.env.DEV_LOGIN !== "1" || !/dev/.test(process.env.DB_PATH ?? "")) throw new Error("Test servers only: set DEV_LOGIN=1 and a DB_PATH with 'dev'.");
-mkdirSync(dirname(process.env.DB_PATH), { recursive: true });
-const db = openDb(process.env.DB_PATH);
+const dbPath = process.env.DB_PATH ?? "";
+if (process.env.DEV_LOGIN !== "1" || !/dev/.test(dbPath)) throw new Error("Test servers only: set DEV_LOGIN=1 and a DB_PATH with 'dev'.");
+mkdirSync(dirname(dbPath), { recursive: true });
+const db = openDb(dbPath);
 const season = initSeason(db, Date.parse(process.env.SEASON_START ?? ""));
 const now = Date.now();
 ensureDays(db, now);
@@ -28,4 +29,4 @@ for (const [i, name] of names.entries()) {
     openChest(db, id, "daily", now, season);
   } catch {}
 }
-console.log(`Seeded ${names.length} players into ${process.env.DB_PATH}`);
+console.log(`Seeded ${names.length} players into ${dbPath}`);
