@@ -992,7 +992,10 @@ async function checkDay(day: string): Promise<{ ok: boolean; checked: number; mi
   if (!d.secret && !d.rolls.length) return { ok: false, checked: 0, mismatches: [], note: "No rolls on that day." };
   if (!d.secret) return { ok: false, checked: 0, mismatches: [], note: "This day's seal opens a minute after 00:00 UTC." };
   if (!d.rolls.length) return { ok: false, checked: 0, mismatches: [], note: "No rolls on that day." };
-  return verifyDay(d.secret, d.rolls as CheckRoll[], records()[day]);
+  // A find right after midnight can use the number set the day before: accept any number this browser saw.
+  const all = records(), rec = all[day];
+  const seeds = rec?.seeds?.length ? [...new Set(Object.values(all).flatMap((r) => r.seeds ?? []))] : undefined;
+  return verifyDay(d.secret, d.rolls as CheckRoll[], { commit: rec?.commit, seeds });
 }
 
 async function share(rollId: number, channel: "x" | "telegram") {
@@ -1162,8 +1165,8 @@ document.addEventListener("submit", async (ev) => {
     const p = ui.state.prize as Prize;
     try {
       const country = data.country!.trim(), address = data.address!.trim();
-      if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("That payout address is not valid.");
-      const { getAddress } = await import("viem");
+      const { getAddress, isAddress } = await import("viem");
+      if (!isAddress(address)) throw new Error("That payout address is not valid.");
       const message = payoutMessage({ seasonId: p.seasonId, playerId: p.playerId, name: p.name, country, address: getAddress(address) });
       const w = await wallet();
       const [from] = await w.request({ method: "eth_requestAccounts" });
@@ -1180,7 +1183,7 @@ document.addEventListener("submit", async (ev) => {
     const btn = document.getElementById("transfer-send") as HTMLButtonElement;
     try {
       const to = data.to!.trim();
-      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error("That address is not valid.");
+      if (!(await import("viem")).isAddress(to)) throw new Error("That address is not valid. Check every character.");
       btn.disabled = true;
       btn.textContent = "Sending…";
       const t = await transferQuote();

@@ -10,7 +10,6 @@ const NONCE_MS = 5 * 60_000;
 
 export function createSession(db: Database, playerId: number, now: number) {
   const token = randomBytes(32).toString("hex");
-  db.query("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.query("INSERT INTO sessions (token, player_id, expires_at) VALUES (?, ?, ?)").run(token, playerId, now + SESSION_MS);
   return token;
 }
@@ -89,8 +88,12 @@ export function recordSignal(db: Database, playerId: number, ip: string, device:
 // In-memory sliding window per key. ponytail: per-process, move to the DB if the game runs on several processes.
 const hits = new Map<string, number[]>();
 const HOUR_MS = 3_600_000; // longest window in use is 10 minutes
+let swept = 0;
 export function rateLimit(key: string, max: number, windowMs: number, now: number) {
-  if (hits.size > 10_000) for (const [k, list] of hits) if (list.at(-1)! < now - HOUR_MS) hits.delete(k);
+  if (now - swept > 60_000) {
+    swept = now;
+    for (const [k, list] of hits) if (list.at(-1)! < now - HOUR_MS) hits.delete(k);
+  }
   const list = (hits.get(key) ?? []).filter((t) => t > now - windowMs);
   if (list.length >= max) throw new GameError("Too many tries. Wait a few minutes.", 429);
   list.push(now);

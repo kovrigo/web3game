@@ -60,6 +60,8 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
   const sidCookie = (req: Request, token: string, maxAge: number) =>
     `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${origin(req).startsWith("https") ? "; Secure" : ""}`;
   let server: Server<unknown> | null = null;
+  let feedCache: { at: number; rows: ReturnType<typeof feed> } | null = null;
+  const cards = new Map<number, { at: number; png: Uint8Array<ArrayBuffer> }>(); // rendered share cards, 5 minutes
   const ip = (req: Request) =>
     // The proxy appends the address it saw: the last entry is the only one a client cannot forge.
     (env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() : null) ?? server?.requestIP(req)?.address ?? "unknown";
@@ -201,8 +203,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         const kind = (await body(req)).kind;
         if (kind !== "daily" && kind !== "guaranteed") throw new GameError("Unknown chest.");
         const t = now();
-        const r = openChest(db, id, kind, t, S());
-        dropBoardCache();
+        const r = openChest(db, id, kind, t, S()); // points move only with waves: the board cache stays
         return { roll: rollView(db, S(), r), state: { ...buildState(db, id, t, S()), prize: prize(id) } };
       }),
     },
@@ -263,7 +264,11 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       };
     }),
 
-    "/api/feed": h(() => feed(db, S())),
+    "/api/feed": h(() => {
+      // Polled by every open page: one query per 5 seconds at most.
+      if (!feedCache || now() - feedCache.at > 5_000) feedCache = { at: now(), rows: feed(db, S()) };
+      return feedCache.rows;
+    }),
 
     "/api/announcements": h(() => db.query("SELECT text, at FROM announcements ORDER BY id DESC LIMIT 20").all()),
 
@@ -332,10 +337,15 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     "/card/:file": (req: any) => {
       const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(Number(String(req.params.file).replace(/\.png$/, "")));
       if (!r || !r.rarity || r.item_id === null) return new Response("Not found", { status: 404 });
-      const v = rollView(db, S(), r);
-      const link = `${new URL(origin(req)).host}/i/${v.player.invite}`;
-      const png = cardPng({ player: v.player.name, founder: v.player.founder, item: v.item!.name, rarity: r.rarity, link, roll: `${r.kind} #${r.n} · ${fmtDay(r.day)}` });
-      return new Response(new Uint8Array(png), { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
+      let c = cards.get(r.id);
+      if (!c || now() - c.at > 300_000) {
+        const v = rollView(db, S(), r);
+        const link = `${new URL(origin(req)).host}/i/${v.player.invite}`;
+        c = { at: now(), png: new Uint8Array(cardPng({ player: v.player.name, founder: v.player.founder, item: v.item!.name, rarity: r.rarity, link, roll: `${r.kind} #${r.n} · ${fmtDay(r.day)}` })) };
+        if (cards.size >= 500) cards.delete(cards.keys().next().value!);
+        cards.set(r.id, c);
+      }
+      return new Response(c.png, { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
     },
 
     "/api/prize": h((req) => prize(named(req))),
@@ -408,7 +418,9 @@ if (import.meta.main) {
   if (env.DEV_LOGIN !== "1" && (!env.PUBLIC_ORIGIN || !env.IP_SALT)) throw new Error("PUBLIC_ORIGIN and IP_SALT must be set.");
   if (env.DEV_LOGIN !== "1" && env.ADMIN_TOKENS && env.ADMIN_TOKENS.split(",").some((p) => p.slice(p.indexOf(":") + 1).length < 24)) throw new Error("Each team key in ADMIN_TOKENS needs 24 characters or more.");
   // Test sign-in lets anyone in by name: it never runs next to a real chain or treasury.
-  if (env.DEV_LOGIN === "1" && (env.CHAIN_ID || env.TREASURY_ADDRESS)) throw new Error("DEV_LOGIN=1 cannot run with CHAIN_ID or TREASURY_ADDRESS.");
+  if (env.DEV_LOGIN === "1" && (env.CHAIN_ID || env.TREASURY_ADDRESS || !/dev/.test(env.DB_PATH ?? ""))) {
+    throw new Error("DEV_LOGIN=1 runs only on a dev database (DB_PATH with 'dev') and never with CHAIN_ID or TREASURY_ADDRESS.");
+  }
   const dbPath = env.DB_PATH ?? "data/game.sqlite";
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = openDb(dbPath);
@@ -424,6 +436,7 @@ if (import.meta.main) {
   app.attach(server);
   const run = () => {
     try {
+      db.query("DELETE FROM sessions WHERE expires_at < ?").run(Date.now());
       P.seasonTick(db, Date.now());
     } catch (e) {
       console.error("tick failed", e);
