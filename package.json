@@ -1,0 +1,14 @@
+{
+  "name": "season-one",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "DEV_LOGIN=1 bun --hot src/server.ts",
+    "start": "bun src/server.ts",
+    "test": "bun test"
+  },
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
+    "viem": "^2.57.2"
+  }
+}
