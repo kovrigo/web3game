@@ -45,12 +45,12 @@ test("test sign-in, visit, daily chest once a day", async () => {
   expect(v.status).toBe(200);
   expect(v.body.today.seed).toBe("ab".repeat(16));
   expect(v.body.season.phase).toBe("live");
-  const o = await call("/api/chest/open", { kind: "daily" }, s);
-  expect(o.status).toBe(200);
-  expect(o.body.roll.sealed).toBe(true);
-  const again = await call("/api/chest/open", { kind: "daily" }, s);
-  expect(again.status).toBe(409);
-  expect(again.body.error).toBe("Today's chest is already open.");
+  expect((await call("/api/visit", null, s)).status).toBe(400);
+  // Two taps at once: one chest.
+  const both = await Promise.all([call("/api/chest/open", { kind: "daily" }, s), call("/api/chest/open", { kind: "daily" }, s)]);
+  expect(both.map((r) => r.status).sort()).toEqual([200, 409]);
+  expect(both.find((r) => r.status === 200)!.body.roll.sealed).toBe(true);
+  expect(both.find((r) => r.status === 409)!.body.error).toBe("Today's chest is already open.");
 });
 
 test("signed out gets the signed-out sentence", async () => {
@@ -68,6 +68,9 @@ test("wallet sign-in with a signed message, a reused message fails", async () =>
   expect(ok.body.player.needsName).toBe(true);
   const reuse = await call("/api/auth/siwe/verify", { message: body.message, signature, accept: true });
   expect(reuse.status).toBe(401);
+  const other = (await call("/api/auth/siwe/message", { address: acct.address })).body.message as string;
+  const moved = other.replace(/^URI: .*$/m, "URI: https://evil.example");
+  expect((await call("/api/auth/siwe/verify", { message: moved, signature: await acct.signMessage({ message: moved }), accept: true })).status).toBe(401);
   const s = sid(ok.cookie);
   expect((await call("/api/name", { name: "walletpal" }, s)).status).toBe(200);
   expect((await call("/api/name", { name: "WALLETPAL" }, sid((await call("/api/auth/dev", { name: "other1", accept: true })).cookie))).status).toBe(409);
@@ -128,6 +131,10 @@ test("invite link sets the cookie and the friend gets the referrer", async () =>
   const code = (await call("/api/visit", {}, s)).body.friends.code;
   const r = await fetch(`${base}/i/${code}?to=//evil.example`, { redirect: "manual" });
   expect(r.headers.get("location")).toBe("/");
+  const slash = await fetch(`${base}/i/${code}?to=${encodeURIComponent("/\\evil.example")}`, { redirect: "manual" });
+  expect(slash.headers.get("location")).toBe("/");
+  const receipt = await fetch(`${base}/i/${code}?to=${encodeURIComponent("/#/receipt/5")}`, { redirect: "manual" });
+  expect(receipt.headers.get("location")).toBe("/#/receipt/5");
   const inv = r.headers.get("set-cookie")!.split(";")[0]!;
   const friend = await call("/api/auth/dev", { name: "guesty", accept: true }, { cookie: inv });
   const ref = db.query("SELECT referrer_id FROM players WHERE id = ?").get(friend.body.player.id) as { referrer_id: number };
@@ -152,4 +159,36 @@ test("season end over HTTP: prize confirm by signature, winners hidden until pub
   expect((await call("/api/appeal", { email: "c@example.com", text: "Objection before publish.", kind: "objection" }, s)).status).toBe(409);
   expect((await call("/api/dev/chain", { method: "eth_chainId" })).status).toBe(404);
   expect((await call("/api/admin/dev", { action: "end-now" }, { authorization: "Bearer k1" })).status).toBe(404);
+});
+
+test("real server: every test-only route is 404, team routes too without team keys", async () => {
+  const real = createApp({ db, env: {}, now: () => clock });
+  const srv = Bun.serve({ port: 0, routes: real.routes, fetch: () => new Response("Not found", { status: 404 }) });
+  real.attach(srv);
+  try {
+    const at = (path: string, data?: unknown, headers: Record<string, string> = {}) =>
+      fetch(srv.url.origin + path, { method: data === undefined ? "GET" : "POST", headers: { "content-type": "application/json", ...headers }, body: data === undefined ? undefined : JSON.stringify(data) }).then((r) => r.status);
+    expect(await at("/api/auth/dev", { name: "sneaky", accept: true })).toBe(404);
+    expect(await at("/api/dev/chain", { method: "eth_chainId" })).toBe(404);
+    expect(await at("/dev/explorer/tx/0x01")).toBe(404);
+    expect(await at("/api/admin/dev", { action: "pay-all" })).toBe(404);
+    expect(await at("/api/admin/queue", undefined, { authorization: "Bearer k1" })).toBe(404);
+  } finally {
+    srv.stop(true);
+  }
+});
+
+test("every team route needs a team key", async () => {
+  clock += 600_001; // fresh rate-limit window
+  for (const path of ["queue", "appeals", "metrics", "winners"]) expect((await call(`/api/admin/${path}`)).status).toBe(401);
+  for (const path of ["review", "appeal", "correction", "winner-check", "sanctions", "rate", "publish", "payout", "next-season"]) {
+    expect((await call(`/api/admin/${path}`, {}, { authorization: "Bearer wrong" })).status).toBe(401);
+  }
+});
+
+test("wrong team keys are rate limited", async () => {
+  clock += 600_001;
+  for (let i = 0; i < 20; i++) expect((await call("/api/admin/queue", undefined, { authorization: `Bearer guess${i}` })).status).toBe(401);
+  expect((await call("/api/admin/queue", undefined, { authorization: "Bearer guess-last" })).status).toBe(429);
+  expect((await call("/api/admin/queue", undefined, { authorization: "Bearer k1" })).status).toBe(200);
 });

@@ -1,18 +1,23 @@
 import type { Database } from "bun:sqlite";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { dayOf, DAY_MS, GameError, type Season } from "./game";
 import { dropBoardCache } from "./social";
 
+// Constant-time compare: hashing first gives both sides the same length.
+const digest = (s: string) => createHash("sha256").update(s).digest();
 export function adminFromToken(tokens: string | undefined, header: string | null): string | null {
   if (!tokens || !header?.startsWith("Bearer ")) return null;
-  const given = header.slice(7);
+  const given = digest(header.slice(7));
   for (const pair of tokens.split(",")) {
-    const [name, token] = pair.split(":");
-    if (name && token && token === given) return name;
+    const i = pair.indexOf(":");
+    const name = pair.slice(0, i), token = pair.slice(i + 1);
+    if (i < 0) continue;
+    if (name && token && timingSafeEqual(digest(token), given)) return name;
   }
   return null;
 }
 
-const log = (db: Database, admin: string, action: string, payload: unknown, now: number) =>
+export const log = (db: Database, admin: string, action: string, payload: unknown, now: number) =>
   db.query("INSERT INTO admin_log (admin, action, payload, at) VALUES (?, ?, ?, ?)").run(admin, action, JSON.stringify(payload), now);
 
 // Accounts that share a connection or a device with another account, most shared first.
@@ -42,7 +47,7 @@ export function setReview(db: Database, admin: string, playerId: number, status:
 
 // An appeal disputes a review; an objection disputes the published winners list.
 export function submitAppeal(db: Database, playerId: number, email: string, text: string, now: number, kind: "appeal" | "objection" = "appeal") {
-  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError("Enter an email we can answer to.");
+  if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new GameError("Enter an email we can answer to.");
   if (text.trim().length < 10) throw new GameError("Tell us a bit more, at least 10 characters.");
   if (db.query("SELECT 1 FROM appeals WHERE player_id = ? AND status = 'open' AND kind = ?").get(playerId, kind)) {
     throw new GameError(kind === "appeal" ? "Your appeal is already with the team." : "Your objection is already with the team.", 409);
@@ -66,7 +71,7 @@ export function resolveAppeal(db: Database, admin: string, id: number, status: s
 }
 
 export function addCorrection(db: Database, admin: string, season: Season, playerId: number, delta: number, reason: string, now: number) {
-  if (!Number.isInteger(delta) || delta === 0) throw new GameError("Change must be a whole number, not zero.");
+  if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > 1_000_000_000) throw new GameError("Change must be a whole number, not zero, at most 1,000,000,000.");
   if (!reason.trim()) throw new GameError("Give the reason that will be announced.");
   const p = db.query<{ name: string }, [number]>("SELECT name FROM players WHERE id = ?").get(playerId);
   if (!p) throw new GameError("No such player.", 404);

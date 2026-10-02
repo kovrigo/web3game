@@ -5,11 +5,12 @@ import { createSiweMessage, generateSiweNonce, parseSiweMessage, validateSiweMes
 import * as C from "./config";
 import { GameError } from "./game";
 
-const SESSION_MS = 30 * 86_400_000;
+export const SESSION_MS = 30 * 86_400_000;
 const NONCE_MS = 5 * 60_000;
 
 export function createSession(db: Database, playerId: number, now: number) {
   const token = randomBytes(32).toString("hex");
+  db.query("DELETE FROM sessions WHERE expires_at < ?").run(now);
   db.query("INSERT INTO sessions (token, player_id, expires_at) VALUES (?, ?, ?)").run(token, playerId, now + SESSION_MS);
   return token;
 }
@@ -71,7 +72,7 @@ export async function siweVerify(db: Database, message: string, signature: strin
   const nonceRow = fields.nonce
     ? db.query("DELETE FROM siwe_nonces WHERE nonce = ? AND expires_at > ? RETURNING nonce").get(fields.nonce, now)
     : null;
-  if (!nonceRow || !fields.address || !validateSiweMessage({ message: fields, domain: url.host, time: new Date(now) })) {
+  if (!nonceRow || !fields.address || fields.uri !== url.origin || fields.chainId !== 1 || !validateSiweMessage({ message: fields, domain: url.host, time: new Date(now) })) {
     throw new GameError("Sign-in expired. Try again.", 401);
   }
   const ok = await verifyMessage({ address: fields.address, message, signature: signature as `0x${string}` }).catch(() => false);
@@ -87,7 +88,9 @@ export function recordSignal(db: Database, playerId: number, ip: string, device:
 
 // In-memory sliding window per key. ponytail: per-process, move to the DB if the game runs on several processes.
 const hits = new Map<string, number[]>();
+const HOUR_MS = 3_600_000; // longest window in use is 10 minutes
 export function rateLimit(key: string, max: number, windowMs: number, now: number) {
+  if (hits.size > 10_000) for (const [k, list] of hits) if (list.at(-1)! < now - HOUR_MS) hits.delete(k);
   const list = (hits.get(key) ?? []).filter((t) => t > now - windowMs);
   if (list.length >= max) throw new GameError("Too many tries. Wait a few minutes.", 429);
   list.push(now);

@@ -28,6 +28,7 @@ export function rpc(method: string, params: any[], now: number): unknown {
     case "eth_sendTransaction": {
       const t = params[0] ?? {};
       const from = key(String(t.from)), value = BigInt(t.value ?? 0), gas = BigInt(t.gas ?? 21000), price = BigInt(t.gasPrice ?? GAS_PRICE);
+      if (value < 0n || gas < 21000n || price < GAS_PRICE) throw new GameError("Mock chain: bad value, gas or gas price.");
       const have = balances.get(from) ?? 0n;
       if (have < value + gas * price) throw new GameError("insufficient funds for gas * price + value");
       balances.set(from, have - value - gas * price);

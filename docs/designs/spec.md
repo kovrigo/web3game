@@ -68,9 +68,10 @@ Repo holds docs only (`DESIGN.md`, `CLAUDE.md`, `docs/designs/*`). No code, no `
 - Concurrency: every mutating handler runs one `db.transaction(...).immediate()` with no `await` inside. `UNIQUE(player_id, kind, n)` on rolls. Test: two parallel visits credit waves once.
 - Session: 32 random bytes, cookie `sid`, HttpOnly, SameSite=Lax, Secure when `https`, 30 days.
 - 18+ and rules acceptance: required boolean `accept` on every sign-in call; stored `accepted_at`.
-- SIWE: `POST /api/auth/siwe/message {address}` returns the EIP-4361 text with a server nonce (5 min, single use). `POST /api/auth/siwe/verify {message, signature, accept}` checks nonce, domain, expiry, signature (`viem` `verifyMessage`). Creates the player on first sign-in.
+- SIWE: `POST /api/auth/siwe/message {address}` returns the EIP-4361 text with a server nonce (5 min, single use). `POST /api/auth/siwe/verify {message, signature, accept}` checks nonce, domain, URI, chain ID 1, expiry, signature (`viem` `verifyMessage`). Creates the player on first sign-in.
 - Dev sign-in: `POST /api/auth/dev {name, accept}` exists only when `DEV_LOGIN=1`; otherwise 404.
-- Rate limit: in-memory, per IP hash, 20 sign-in calls and 60 chest opens per 10 minutes. 429 with message.
+- Rate limit: in-memory, per 10 minutes: 20 sign-in calls and 20 wrong team keys per IP; per player 60 chest opens, 120 visits, 20 seed changes, 30 shares. 429 with message. With `TRUST_PROXY=1` the IP is the last `x-forwarded-for` entry.
+- Boot checks on a real server (`DEV_LOGIN` unset): `PUBLIC_ORIGIN` and `IP_SALT` set; every team key in `ADMIN_TOKENS` at least 24 characters. `DEV_LOGIN=1` refuses to start with `CHAIN_ID` or `TREASURY_ADDRESS`. Request bodies: a JSON object, at most 64 KB.
 - Sign-in signals: `signals(player_id, ip_hash, device)` where `ip_hash = sha256(IP_SALT + ip)`, device from header `x-device` (client random id in localStorage).
 
 ## API (JSON, errors `{error: "<sentence shown to the player>"}`)

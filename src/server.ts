@@ -5,7 +5,7 @@ import { dirname } from "node:path";
 import adminPage from "../web/admin.html";
 import indexPage from "../web/index.html";
 import * as A from "./admin";
-import { createSession, endSession, findOrCreate, ipHash, rateLimit, recordSignal, sessionPlayer, siweMessage, siweVerify } from "./auth";
+import { createSession, endSession, SESSION_MS, findOrCreate, ipHash, rateLimit, recordSignal, sessionPlayer, siweMessage, siweVerify } from "./auth";
 import { cardPng } from "./card";
 import * as C from "./config";
 import { openDb } from "./db";
@@ -26,16 +26,21 @@ const fail = (e: unknown) => {
   return json({ error: "Something broke on our side. Try again." }, 500);
 };
 const cookies = (req: Request) =>
-  Object.fromEntries((req.headers.get("cookie") ?? "").split(/;\s*/).filter(Boolean).map((c) => {
+  Object.fromEntries((req.headers.get("cookie") ?? "").split(/;\s*/).filter((c) => c.includes("=")).map((c) => {
     const i = c.indexOf("=");
-    return [c.slice(0, i), decodeURIComponent(c.slice(i + 1))];
+    const v = c.slice(i + 1);
+    try {
+      return [c.slice(0, i), decodeURIComponent(v)];
+    } catch {
+      return [c.slice(0, i), v];
+    }
   }));
 const body = async (req: Request) => {
   try {
-    return (await req.json()) as Record<string, any>;
-  } catch {
-    throw new GameError("Request body must be JSON.");
-  }
+    const b = await req.json();
+    if (b && typeof b === "object" && !Array.isArray(b)) return b as Record<string, any>;
+  } catch {}
+  throw new GameError("Request body must be a JSON object.");
 };
 
 export function createApp({ db, env, now = Date.now }: AppOptions) {
@@ -52,7 +57,8 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${origin(req).startsWith("https") ? "; Secure" : ""}`;
   let server: Server<unknown> | null = null;
   const ip = (req: Request) =>
-    (env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",")[0]?.trim() : null) ?? server?.requestIP(req)?.address ?? "unknown";
+    // The proxy appends the address it saw: the last entry is the only one a client cannot forge.
+    (env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() : null) ?? server?.requestIP(req)?.address ?? "unknown";
 
   const me = (req: Request) => {
     const id = sessionPlayer(db, cookies(req).sid, now());
@@ -81,7 +87,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     const token = createSession(db, id, t);
     const p = getPlayer(db, id)!;
     return new Response(JSON.stringify({ player: { id, name: p.name, needsName: !p.name } }), {
-      headers: { "content-type": "application/json", "set-cookie": sidCookie(req, token, 30 * 86400) },
+      headers: { "content-type": "application/json", "set-cookie": sidCookie(req, token, SESSION_MS / 1000) },
     });
   };
   const accepted = (b: Record<string, any>) => {
@@ -91,7 +97,10 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
   const admin = (req: Request) => {
     if (!env.ADMIN_TOKENS) throw new GameError("Not found.", 404);
     const name = A.adminFromToken(env.ADMIN_TOKENS, req.headers.get("authorization"));
-    if (!name) throw new GameError("Wrong team key.", 401);
+    if (!name) {
+      rateLimit(`team:${ip(req)}`, 20, 600_000, now());
+      throw new GameError("Wrong team key.", 401);
+    }
     return name;
   };
 
@@ -120,12 +129,13 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         rateLimit(`in:${ip(req)}`, 20, 600_000, now());
         const b = await body(req);
         accepted(b);
-        const err = nameError(String(b.name ?? ""));
+        const name = String(b.name ?? "");
+        const err = nameError(name);
         if (err) throw new GameError(err);
-        const res = signIn(req, { name: b.name }, String(b.device ?? ""));
+        const res = signIn(req, { name }, String(b.device ?? ""));
         // Test server with the mock chain: the browser's throwaway wallet becomes the sign-in wallet.
         if (mock && typeof b.wallet === "string" && isAddress(b.wallet)) {
-          db.query("UPDATE players SET wallet = ? WHERE name = ? AND wallet IS NULL AND NOT EXISTS (SELECT 1 FROM players WHERE wallet = ?)").run(getAddress(b.wallet), b.name, getAddress(b.wallet));
+          db.query("UPDATE players SET wallet = ? WHERE name = ? AND wallet IS NULL AND NOT EXISTS (SELECT 1 FROM players WHERE wallet = ?)").run(getAddress(b.wallet), name, getAddress(b.wallet));
         }
         return res;
       }),
@@ -170,6 +180,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     "/api/visit": {
       POST: h(async (req) => {
         const id = named(req);
+        rateLimit(`visit:${id}`, 120, 600_000, now());
         const b = await body(req);
         const t = now();
         ensureDays(db, t);
@@ -195,6 +206,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     "/api/seed": {
       POST: h(async (req) => {
         const id = named(req);
+        rateLimit(`seed:${id}`, 20, 600_000, now());
         const seed = String((await body(req)).seed ?? "").trim().toLowerCase();
         setSeed(db, id, seed, now());
         return { seed };
@@ -255,14 +267,16 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       POST: h(async (req) => {
         const id = named(req);
         const b = await body(req);
+        if (typeof b.hidden !== "boolean") throw new GameError("Hidden is true or false.");
         db.query("UPDATE players SET hidden = ? WHERE id = ?").run(b.hidden ? 1 : 0, id);
-        return { hidden: !!b.hidden };
+        return { hidden: b.hidden };
       }),
     },
 
     "/api/share": {
       POST: h(async (req) => {
         const id = named(req);
+        rateLimit(`share:${id}`, 30, 600_000, now());
         const b = await body(req);
         if (b.channel !== "x" && b.channel !== "telegram") throw new GameError("Unknown channel.");
         const r = db.query("SELECT 1 FROM rolls WHERE id = ? AND player_id = ?").get(Number(b.rollId), id);
@@ -288,7 +302,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       const code = String(req.params.code).replace(/[^A-Z0-9]/gi, "").slice(0, 16);
       return new Response(null, {
         status: 302,
-        headers: { location: to?.startsWith("/") && !to.startsWith("//") ? to : "/", "set-cookie": `inv=${code}; Path=/; SameSite=Lax; Max-Age=${30 * 86400}` },
+        headers: { location: to && /^\/#\/[\w/-]*$/.test(to) ? to : "/", "set-cookie": `inv=${code}; Path=/; SameSite=Lax; Max-Age=${30 * 86400}` },
       });
     },
 
@@ -312,7 +326,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     },
 
     "/card/:file": (req: any) => {
-      const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(parseInt(req.params.file));
+      const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(Number(String(req.params.file).replace(/\.png$/, "")));
       if (!r || !r.rarity || r.item_id === null) return new Response("Not found", { status: 404 });
       const v = rollView(db, S(), r);
       const link = `${new URL(origin(req)).host}/i/${v.player.invite}`;
@@ -360,8 +374,8 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     "/api/admin/payout": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.recordPayout(db, a, S(), Number(b.id), String(b.txHash ?? ""), now()); return {}; }) },
     "/api/admin/dev": {
       POST: h(async (req) => {
-        const a = admin(req);
         if (!mock) throw new GameError("Not found.", 404);
+        const a = admin(req);
         await devAction(db, a, String((await body(req)).action), now());
         return {};
       }),
@@ -383,6 +397,11 @@ const fmtDay = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString(
 if (import.meta.main) {
   const env = process.env;
   if (!env.PORT) throw new Error("PORT is not set. Start the dev server with `paneweb up`.");
+  // A real server never guesses its own address or runs without a salt for IP hashes.
+  if (env.DEV_LOGIN !== "1" && (!env.PUBLIC_ORIGIN || !env.IP_SALT)) throw new Error("PUBLIC_ORIGIN and IP_SALT must be set.");
+  if (env.DEV_LOGIN !== "1" && env.ADMIN_TOKENS && env.ADMIN_TOKENS.split(",").some((p) => p.slice(p.indexOf(":") + 1).length < 24)) throw new Error("Each team key in ADMIN_TOKENS needs 24 characters or more.");
+  // Test sign-in lets anyone in by name: it never runs next to a real chain or treasury.
+  if (env.DEV_LOGIN === "1" && (env.CHAIN_ID || env.TREASURY_ADDRESS)) throw new Error("DEV_LOGIN=1 cannot run with CHAIN_ID or TREASURY_ADDRESS.");
   const dbPath = env.DB_PATH ?? "data/game.sqlite";
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = openDb(dbPath);
@@ -391,6 +410,7 @@ if (import.meta.main) {
   const server = Bun.serve({
     port: Number(env.PORT),
     development: env.DEV_LOGIN === "1",
+    maxRequestBodySize: 64 * 1024,
     routes: app.routes,
     fetch: () => Response.json({ error: "Not found." }, { status: 404 }),
   });
