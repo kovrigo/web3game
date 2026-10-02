@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, expect, test } from "bun:test";
+import { tmpdir } from "node:os";
 import { generatePrivateKey, privateKeyToAccount } from "viem/accounts";
 import { openDb } from "../src/db";
 import { verifyDay } from "../src/fair";
@@ -123,6 +124,17 @@ test("share card and receipt page for a rare roll", async () => {
   expect(await page.text()).toContain('property="og:image"');
   const png = await fetch(`${base}/card/${row.id}.png`);
   expect(png.headers.get("content-type")).toBe("image/png");
+});
+
+test("wallet helpers load apart from the page script", async () => {
+  const res = await fetch(`${base}/wallet.js`);
+  expect(res.headers.get("content-type")).toContain("javascript");
+  const file = `${tmpdir()}/wallet-${process.pid}.js`;
+  await Bun.write(file, await res.text());
+  const w = await import(file);
+  const a = privateKeyToAccount(w.generatePrivateKey());
+  expect(w.isAddress(a.address)).toBe(true);
+  expect(w.getAddress(a.address.toLowerCase())).toBe(a.address);
 });
 
 test("invite link sets the cookie and the friend gets the referrer", async () => {

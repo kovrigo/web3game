@@ -62,6 +62,7 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
   let server: Server<unknown> | null = null;
   let feedCache: { at: number; rows: ReturnType<typeof feed> } | null = null;
   const cards = new Map<number, { at: number; png: Uint8Array<ArrayBuffer> }>(); // rendered share cards, 5 minutes
+  let walletJs: Promise<string> | null = null; // web/wallet.ts, built on first request
   const ip = (req: Request) =>
     // The proxy appends the address it saw: the last entry is the only one a client cannot forge.
     (env.TRUST_PROXY === "1" ? req.headers.get("x-forwarded-for")?.split(",").at(-1)?.trim() : null) ?? server?.requestIP(req)?.address ?? "unknown";
@@ -357,6 +358,11 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
         cards.set(r.id, c);
       }
       return new Response(c.png, { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
+    },
+
+    "/wallet.js": async () => {
+      walletJs ??= Bun.build({ entrypoints: [`${import.meta.dir}/../web/wallet.ts`], minify: true, target: "browser" }).then((b) => b.outputs[0]!.text());
+      return new Response(await walletJs, { headers: { "content-type": "text/javascript; charset=utf-8", "cache-control": "public, max-age=3600" } });
     },
 
     "/api/prize": h((req) => prize(named(req))),

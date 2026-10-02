@@ -143,9 +143,11 @@ function remember(day: string, commit: string | null, seed: string | null) {
 type Provider = { request(a: { method: string; params?: unknown[] }): Promise<any> };
 let mockProvider: Provider | null = null;
 // Test server only: a throwaway key kept in this browser, talking to the mock chain. No real funds.
+// Built at run time from a URL, so the bundler keeps viem out of the page script.
+const walletLib = (): Promise<typeof import("./wallet")> => import(`${location.origin}/wallet.js`);
 async function mockWallet(): Promise<Provider> {
   if (mockProvider) return mockProvider;
-  const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
+  const { generatePrivateKey, privateKeyToAccount } = await walletLib();
   const key = store.get("mockKey", "") || (() => { const k = generatePrivateKey(); store.set("mockKey", k); return k; })();
   const acct = privateKeyToAccount(key as `0x${string}`);
   mockProvider = {
@@ -1184,7 +1186,7 @@ document.addEventListener("submit", async (ev) => {
     const p = ui.state.prize as Prize;
     try {
       const country = data.country!.trim(), address = data.address!.trim();
-      const { getAddress, isAddress } = await import("viem");
+      const { getAddress, isAddress } = await walletLib();
       if (!isAddress(address)) throw new Error("That payout address is not valid.");
       const message = payoutMessage({ seasonId: p.seasonId, playerId: p.playerId, name: p.name, country, address: getAddress(address) });
       const w = await wallet();
@@ -1202,7 +1204,7 @@ document.addEventListener("submit", async (ev) => {
     const btn = document.getElementById("transfer-send") as HTMLButtonElement;
     try {
       const to = data.to!.trim();
-      if (!(await import("viem")).isAddress(to)) throw new Error("That address is not valid. Check every character.");
+      if (!(await walletLib()).isAddress(to)) throw new Error("That address is not valid. Check every character.");
       btn.disabled = true;
       btn.textContent = "Sending…";
       const t = await transferQuote();
