@@ -9,11 +9,14 @@ import { createSession, endSession, findOrCreate, ipHash, rateLimit, recordSigna
 import { cardPng } from "./card";
 import * as C from "./config";
 import { openDb } from "./db";
-import { dayOf, ensureDays, fairDay, GameError, getPlayer, openChest, phaseOf, seasonFromEnv, setSeed, tick, visit, type RollRow, type Season } from "./game";
+import { getAddress, isAddress } from "viem";
+import * as chain from "./devchain";
+import { currentSeason, dayOf, ensureDays, fairDay, GameError, getPlayer, initSeason, openChest, phaseOf, setSeed, visit, type RollRow } from "./game";
+import * as P from "./prize";
 import { boards, buildState, dropBoardCache, feed, nameError, rollView, standing } from "./social";
 
 type Env = Record<string, string | undefined>;
-export type AppOptions = { db: Database; season: Season; env: Env; now?: () => number };
+export type AppOptions = { db: Database; env: Env; now?: () => number };
 
 const json = (data: unknown, status = 200) => Response.json(data, { status });
 const fail = (e: unknown) => {
@@ -34,8 +37,14 @@ const body = async (req: Request) => {
   }
 };
 
-export function createApp({ db, season, env, now = Date.now }: AppOptions) {
+export function createApp({ db, env, now = Date.now }: AppOptions) {
   const dev = env.DEV_LOGIN === "1";
+  const mock = dev && env.MOCK_CHAIN === "1";
+  const S = () => currentSeason(db)!;
+  const exchanges = (env.EXCHANGES ?? "").split(",").filter(Boolean).map((e) => {
+    const [name, url] = e.split("|");
+    return { name: name!.trim(), url: url?.trim() ?? null };
+  });
   const salt = env.IP_SALT ?? "";
   const origin = (req: Request) => env.PUBLIC_ORIGIN ?? new URL(req.url).origin;
   const sidCookie = (req: Request, token: string, maxAge: number) =>
@@ -90,8 +99,10 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
     "/admin": adminPage,
 
     "/api/season": h(() => ({
-      phase: phaseOf(season, now()), start: season.start, end: season.end, now: now(),
+      id: S().id, phase: phaseOf(S(), now()), start: S().start, end: S().end, now: now(),
+      publishedAt: S().published_at, objectionsUntil: P.objectionsUntil(S()), payBy: S().end + P.PAY_WITHIN_DAYS * 86_400_000, ethRate: S().eth_rate,
       treasury: env.TREASURY_ADDRESS ?? null, explorer: env.EXPLORER_URL ?? null,
+      chainId: mock ? chain.MOCK_CHAIN_ID : env.CHAIN_ID ? Number(env.CHAIN_ID) : null, mockChain: mock, exchanges,
       fund: C.PRIZE_FUND, prizes: C.PRIZES, odds: { find: C.FIND_TABLE, guaranteed: C.GUARANTEED_TABLE, daily: [1, 2, 3, 4, 5, 6, 7].map(C.dailyTable) },
       devLogin: dev,
     })),
@@ -110,7 +121,12 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
         accepted(b);
         const err = nameError(String(b.name ?? ""));
         if (err) throw new GameError(err);
-        return signIn(req, { name: b.name }, String(b.device ?? ""));
+        const res = signIn(req, { name: b.name }, String(b.device ?? ""));
+        // Test server with the mock chain: the browser's throwaway wallet becomes the sign-in wallet.
+        if (mock && typeof b.wallet === "string" && isAddress(b.wallet)) {
+          db.query("UPDATE players SET wallet = ? WHERE name = ? AND wallet IS NULL AND NOT EXISTS (SELECT 1 FROM players WHERE wallet = ?)").run(getAddress(b.wallet), b.name, getAddress(b.wallet));
+        }
+        return res;
       }),
     },
     "/api/auth/siwe/message": {
@@ -156,9 +172,9 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
         const b = await body(req);
         const t = now();
         ensureDays(db, t);
-        visit(db, id, t, season, typeof b.seed === "string" ? b.seed : undefined);
+        visit(db, id, t, S(), typeof b.seed === "string" ? b.seed : undefined);
         if (typeof b.device === "string") recordSignal(db, id, ipHash(salt, ip(req)), b.device, t);
-        return buildState(db, id, t, season);
+        return { ...buildState(db, id, t, S()), prize: P.myPrize(db, S(), id) };
       }),
     },
 
@@ -169,9 +185,9 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
         const kind = (await body(req)).kind;
         if (kind !== "daily" && kind !== "guaranteed") throw new GameError("Unknown chest.");
         const t = now();
-        const r = openChest(db, id, kind, t, season);
+        const r = openChest(db, id, kind, t, S());
         dropBoardCache();
-        return { roll: rollView(db, season, r), state: buildState(db, id, t, season) };
+        return { roll: rollView(db, S(), r), state: { ...buildState(db, id, t, S()), prize: P.myPrize(db, S(), id) } };
       }),
     },
 
@@ -189,13 +205,13 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
       const rows = db
         .query<RollRow, [number]>("SELECT * FROM rolls WHERE player_id = ? AND (kind != 'find' OR rarity IS NOT NULL) ORDER BY id DESC LIMIT 50")
         .all(id);
-      return rows.map((r) => rollView(db, season, r));
+      return rows.map((r) => rollView(db, S(), r));
     }),
 
     "/api/roll/:id": h((req) => {
       const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(Number(req.params.id));
       if (!r) throw new GameError("No such roll.", 404);
-      return rollView(db, season, r);
+      return rollView(db, S(), r);
     }),
 
     "/api/fair/days": h(() =>
@@ -207,7 +223,7 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
 
     "/api/fair/check/:day": h((req) => {
       const id = named(req);
-      const day = req.params.day;
+      const day = String(req.params.day);
       const fd = fairDay(db, day);
       if (!fd) throw new GameError("No seal for that day.", 404);
       const rolls = db.query<RollRow, [number, string]>("SELECT * FROM rolls WHERE player_id = ? AND day = ? ORDER BY id").all(id, day);
@@ -220,9 +236,9 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
     "/api/leaderboard": h((req) => {
       const board = new URL(req.url).searchParams.get("board") === "invites" ? "invites" : "points";
       const t = now();
-      const list = boards(db, season, t)[board];
+      const list = boards(db, S(), t)[board];
       const id = sessionPlayer(db, cookies(req).sid, t);
-      const mine = id ? standing(db, season, t, id, board) : null;
+      const mine = id ? standing(db, S(), t, id, board) : null;
       return {
         board, total: list.length, places: C.PRIZES[board].length,
         rows: list.slice(0, 50).map((r, i) => ({ rank: i + 1, name: r.name, founder: r.founder, points: r.points, invites: r.invites, me: r.id === id })),
@@ -230,7 +246,7 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
       };
     }),
 
-    "/api/feed": h(() => feed(db, season)),
+    "/api/feed": h(() => feed(db, S())),
 
     "/api/announcements": h(() => db.query("SELECT text, at FROM announcements ORDER BY id DESC LIMIT 20").all()),
 
@@ -259,7 +275,9 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
       POST: h(async (req) => {
         const id = named(req);
         const b = await body(req);
-        A.submitAppeal(db, id, String(b.email ?? ""), String(b.text ?? ""), now());
+        const kind = b.kind === "objection" ? "objection" : "appeal";
+        if (kind === "objection" && !(S().published_at && now() < P.objectionsUntil(S())!)) throw new GameError("Objections are closed.", 409);
+        A.submitAppeal(db, id, String(b.email ?? ""), String(b.text ?? ""), now(), kind);
         return {};
       }),
     },
@@ -276,7 +294,7 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
     "/r/:id": (req: any) => {
       const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(Number(req.params.id));
       if (!r || !r.rarity || r.item_id === null) return new Response("Not found", { status: 404 });
-      const v = rollView(db, season, r);
+      const v = rollView(db, S(), r);
       const o = origin(req);
       const title = `${v.player.name} found ${v.item!.name} (${cap(v.rarity!)}) in Season One`;
       const esc = (s: string) => s.replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
@@ -295,10 +313,35 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
     "/card/:file": (req: any) => {
       const r = db.query<RollRow, [number]>("SELECT * FROM rolls WHERE id = ?").get(parseInt(req.params.file));
       if (!r || !r.rarity || r.item_id === null) return new Response("Not found", { status: 404 });
-      const v = rollView(db, season, r);
+      const v = rollView(db, S(), r);
       const link = `${new URL(origin(req)).host}/i/${v.player.invite}`;
       const png = cardPng({ player: v.player.name, founder: v.player.founder, item: v.item!.name, rarity: r.rarity, link, roll: `${r.kind} #${r.n} · ${fmtDay(r.day)}` });
-      return new Response(png, { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
+      return new Response(new Uint8Array(png), { headers: { "content-type": "image/png", "cache-control": "public, max-age=300" } });
+    },
+
+    "/api/prize": h((req) => P.myPrize(db, S(), named(req))),
+    "/api/prize/confirm": {
+      POST: h(async (req) => {
+        const id = named(req);
+        const b = await body(req);
+        await P.confirmPrize(db, S(), id, String(b.country ?? ""), String(b.address ?? ""), String(b.signature ?? ""), now());
+        return P.myPrize(db, S(), id);
+      }),
+    },
+    "/api/winners": h(() => P.publicWinners(db, S())),
+
+    // Mock chain, test server only.
+    "/api/dev/chain": {
+      POST: h(async (req) => {
+        if (!mock) throw new GameError("Not found.", 404);
+        const b = await body(req);
+        return { result: chain.rpc(String(b.method), Array.isArray(b.params) ? b.params : [], now()) };
+      }),
+    },
+    "/dev/explorer/:kind/:id": (req: any) => {
+      if (!mock) return new Response("Not found", { status: 404 });
+      const data = req.params.kind === "tx" ? chain.mockTx(req.params.id) : { address: req.params.id, balanceWei: chain.mockBalance(req.params.id) };
+      return new Response(`<!doctype html><meta charset="utf-8"><title>Mock explorer</title><body style="background:#14110F;color:#F4EDE4;font-family:monospace;padding:16px"><h1>Mock chain, test server only</h1><pre>${JSON.stringify(data, null, 2)?.replace(/[<>&]/g, "") ?? "Not found"}</pre></body>`, { headers: { "content-type": "text/html; charset=utf-8" } });
     },
 
     // Team page.
@@ -306,8 +349,27 @@ export function createApp({ db, season, env, now = Date.now }: AppOptions) {
     "/api/admin/review": { POST: h(async (req) => { const a = admin(req); const b = await body(req); A.setReview(db, a, Number(b.playerId), String(b.status), String(b.reason ?? ""), now()); return {}; }) },
     "/api/admin/appeals": h((req) => (admin(req), A.appeals(db))),
     "/api/admin/appeal": { POST: h(async (req) => { const a = admin(req); const b = await body(req); A.resolveAppeal(db, a, Number(b.id), String(b.status), String(b.answer ?? ""), now()); return {}; }) },
-    "/api/admin/correction": { POST: h(async (req) => { const a = admin(req); const b = await body(req); A.addCorrection(db, a, Number(b.playerId), Number(b.delta), String(b.reason ?? ""), now()); return {}; }) },
-    "/api/admin/metrics": h((req) => (admin(req), A.metrics(db, season, now()))),
+    "/api/admin/correction": { POST: h(async (req) => { const a = admin(req); const b = await body(req); A.addCorrection(db, a, S(), Number(b.playerId), Number(b.delta), String(b.reason ?? ""), now()); return {}; }) },
+    "/api/admin/metrics": h((req) => (admin(req), A.metrics(db, S(), now()))),
+    "/api/admin/winners": h((req) => (admin(req), P.teamView(db, S(), now()))),
+    "/api/admin/winner-check": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.teamCheck(db, a, S(), Number(b.id), String(b.team), String(b.reason ?? ""), now()); return {}; }) },
+    "/api/admin/sanctions": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.sanctionsCheck(db, a, S(), Number(b.id), now()); return {}; }) },
+    "/api/admin/rate": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.setRate(db, a, S(), Number(b.rate), now()); return {}; }) },
+    "/api/admin/publish": { POST: h(async (req) => { const a = admin(req); P.publish(db, a, S(), now()); return {}; }) },
+    "/api/admin/payout": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.recordPayout(db, a, S(), Number(b.id), String(b.txHash ?? ""), now()); return {}; }) },
+    "/api/admin/mock-pay": {
+      POST: h(async (req) => {
+        const a = admin(req);
+        if (!mock) throw new GameError("Not found.", 404);
+        const id = Number((await body(req)).id);
+        const w = P.activeWinners(db, S()).find((x) => x.id === id);
+        if (!w?.address || !S().eth_rate) throw new GameError("Winner address and ETH rate are needed.", 409);
+        const wei = BigInt(Math.round((w.prize_usd / S().eth_rate!) * 1e9)) * 10n ** 9n;
+        P.recordPayout(db, a, S(), id, chain.credit(w.address, wei, now()), now());
+        return {};
+      }),
+    },
+    "/api/admin/next-season": { POST: h(async (req) => { const a = admin(req); const b = await body(req); P.startNextSeason(db, a, S(), Date.parse(String(b.start ?? "")), now()); return {}; }) },
   };
 
   return {
@@ -324,11 +386,11 @@ const fmtDay = (day: string) => new Date(`${day}T00:00:00Z`).toLocaleDateString(
 if (import.meta.main) {
   const env = process.env;
   if (!env.PORT) throw new Error("PORT is not set. Start the dev server with `paneweb up`.");
-  const season = seasonFromEnv(env);
   const dbPath = env.DB_PATH ?? "data/game.sqlite";
   mkdirSync(dirname(dbPath), { recursive: true });
   const db = openDb(dbPath);
-  const app = createApp({ db, season, env });
+  const season = initSeason(db, Date.parse(env.SEASON_START ?? "2026-10-06T00:00:00Z"));
+  const app = createApp({ db, env });
   const server = Bun.serve({
     port: Number(env.PORT),
     development: env.DEV_LOGIN === "1",
@@ -338,12 +400,12 @@ if (import.meta.main) {
   app.attach(server);
   const run = () => {
     try {
-      tick(db, Date.now(), season);
+      P.seasonTick(db, Date.now());
     } catch (e) {
       console.error("tick failed", e);
     }
   };
   run();
   setInterval(run, 60_000);
-  console.log(`Season One on ${server.url} (season ${dayOf(season.start)}, ${env.DEV_LOGIN === "1" ? "test sign-in on" : "test sign-in off"})`);
+  console.log(`Season One on ${server.url} (season ${season.id} from ${dayOf(season.start)}, ${env.DEV_LOGIN === "1" ? "test sign-in on" : "test sign-in off"}${env.MOCK_CHAIN === "1" ? ", mock chain" : ""})`);
 }
