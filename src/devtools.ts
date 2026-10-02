@@ -44,7 +44,7 @@ export async function devAction(db: Database, admin: string, action: string, now
     if (!s.eth_rate) throw new GameError("Set the ETH rate first.", 409);
     for (const w of P.activeWinners(db, s).filter((x) => !x.tx_hash)) {
       const wei = BigInt(Math.round((w.prize_usd / s.eth_rate) * 1e9)) * 10n ** 9n;
-      P.recordPayout(db, admin, currentSeason(db)!, w.id, chain.credit(w.address!, wei, now), now);
+      P.recordPayout(db, admin, currentSeason(db)!, w.id, chain.credit(db, w.address!, wei, now), now);
     }
     return;
   }

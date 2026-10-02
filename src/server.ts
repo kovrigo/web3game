@@ -385,12 +385,12 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
       POST: h(async (req) => {
         if (!mock) throw new GameError("Not found.", 404);
         const b = await body(req);
-        return { result: chain.rpc(String(b.method), Array.isArray(b.params) ? b.params : [], now()) };
+        return { result: chain.rpc(db, String(b.method), Array.isArray(b.params) ? b.params : [], now()) };
       }),
     },
     "/dev/explorer/:kind/:id": (req: any) => {
       if (!mock) return new Response("Not found", { status: 404 });
-      const data = req.params.kind === "tx" ? chain.mockTx(req.params.id) : { address: req.params.id, balanceWei: chain.mockBalance(req.params.id) };
+      const data = req.params.kind === "tx" ? chain.mockTx(db, req.params.id) : { address: req.params.id, balanceWei: chain.mockBalance(db, req.params.id) };
       return new Response(`<!doctype html><meta charset="utf-8"><title>Mock explorer</title><body style="background:#14110F;color:#F4EDE4;font-family:monospace;padding:16px"><h1>Mock chain, test server only</h1><pre>${JSON.stringify(data, null, 2)?.replace(/[<>&]/g, "") ?? "Not found"}</pre></body>`, { headers: { "content-type": "text/html; charset=utf-8" } });
     },
 
