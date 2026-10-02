@@ -179,6 +179,8 @@ a { color: var(--text); text-underline-offset: 3px; }
 .field > span { font: 600 .875rem var(--body); }
 .input { width: 100%; min-height: 48px; padding: 10px 12px; border-radius: 6px; border: 1px solid var(--muted); background: var(--ground); color: var(--text); }
 textarea.input { min-height: 104px; resize: vertical; }
+/* A full 42-character address fits a 390 phone field, so both ends can be checked. */
+.input.mono { font-size: .8125rem; }
 .check { display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 10px; align-items: start; min-height: 44px; padding: 10px 0; font-size: .9375rem; cursor: pointer; }
 .check input { width: 22px; height: 22px; accent-color: var(--primary); margin-top: 1px; }
 .field-error { color: var(--error); font-size: .875rem; }
