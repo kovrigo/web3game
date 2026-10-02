@@ -1270,8 +1270,7 @@ document.addEventListener("visibilitychange", () => document.visibilityState ===
 (async () => {
   render();
   try {
-    await loadSeason();
-    const s = await api("/api/session");
+    const [, s] = await Promise.all([loadSeason(), api("/api/session")]);
     ui.session = s.player;
   } catch (e) {
     showError(e);
