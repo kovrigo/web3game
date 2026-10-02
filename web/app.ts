@@ -2,6 +2,7 @@
 // Server holds every number; this file only shows them and asks for changes.
 import { FOUNDER_DAYS, type Rarity, type Table } from "../src/config";
 import { toHex, verifyDay, type CheckRoll, type LocalRecord } from "../src/fair";
+import { amountAfterGas, formatEth, payoutMessage, TRANSFER_GAS } from "../src/payout";
 
 type Item = { id: number; name: string; slot: string; rarity: Rarity };
 type Roll = {
@@ -10,7 +11,18 @@ type Roll = {
   player: { name: string; founder: boolean; invite: string };
 };
 type State = any;
-type Season = { phase: string; start: number; end: number; now: number; treasury: string | null; explorer: string | null; fund: number; prizes: { points: number[]; invites: number[] }; odds: { find: Table; guaranteed: Table; daily: Table[] }; devLogin: boolean };
+type Season = {
+  id: number; phase: string; start: number; end: number; now: number; treasury: string | null; explorer: string | null; fund: number;
+  prizes: { points: number[]; invites: number[] }; odds: { find: Table; guaranteed: Table; daily: Table[] }; devLogin: boolean;
+  publishedAt: number | null; objectionsUntil: number | null; payBy: number; ethRate: number | null;
+  chainId: number | null; mockChain: boolean; exchanges: { name: string; url: string | null }[];
+};
+type Prize = {
+  id: number; board: "points" | "invites"; place: number; prize: number; deadline: number;
+  status: "waiting" | "confirmed" | "paid" | "excluded" | "expired" | "moved"; reason: string | null;
+  country: string | null; address: string | null; txHash: string | null; eth: number | null;
+  wallet: string | null; seasonId: number; playerId: number; name: string;
+};
 
 const DAY = 86_400_000;
 const $app = document.getElementById("app")!;
@@ -30,6 +42,7 @@ const fmtDay = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "
 const fmtDayShort = (ms: number) => new Date(ms).toLocaleDateString("en-GB", { day: "2-digit", month: "short", timeZone: "UTC" });
 const dayKey = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 const clock = () => Date.now() + skew;
+const over = (phase: string) => phase === "ended" || phase === "published" || phase === "paid";
 let skew = 0;
 
 function left(ms: number, seconds = false) {
@@ -118,6 +131,37 @@ function remember(day: string, commit: string | null, seed: string | null) {
   store.set("days", all);
 }
 
+// ---------- wallet
+
+type Provider = { request(a: { method: string; params?: unknown[] }): Promise<any> };
+let mockProvider: Provider | null = null;
+// Test server only: a throwaway key kept in this browser, talking to the mock chain. No real funds.
+async function mockWallet(): Promise<Provider> {
+  if (mockProvider) return mockProvider;
+  const { generatePrivateKey, privateKeyToAccount } = await import("viem/accounts");
+  const key = store.get("mockKey", "") || (() => { const k = generatePrivateKey(); store.set("mockKey", k); return k; })();
+  const acct = privateKeyToAccount(key as `0x${string}`);
+  mockProvider = {
+    async request({ method, params = [] }) {
+      if (method === "eth_requestAccounts" || method === "eth_accounts") return [acct.address];
+      if (method === "personal_sign") return acct.signMessage({ message: { raw: params[0] as `0x${string}` } });
+      return (await api("/api/dev/chain", { method, params })).result;
+    },
+  };
+  return mockProvider;
+}
+async function wallet(): Promise<Provider> {
+  const eth = (window as any).ethereum as Provider | undefined;
+  if (eth) return eth;
+  if (ui.season?.mockChain) return mockWallet();
+  throw new Error("No wallet found. Open this page in a wallet browser or install a wallet extension.");
+}
+const utf8Hex = (text: string) => `0x${toHex(new TextEncoder().encode(text))}`;
+const explorerLink = (kind: "tx" | "address", id: string) => (ui.season?.explorer ? `${ui.season.explorer}/${kind}/${id}` : null);
+const usd = (n: number) => `$${num(n)}`;
+const eth = (n: number | null) => (n === null ? "" : ` (${n.toFixed(4)} ETH)`);
+const boardName = (b: string) => (b === "points" ? "points race" : "invite race");
+
 // ---------- state
 
 const ui = {
@@ -162,7 +206,7 @@ function bar() {
   if (phase === "upcoming") {
     time = `Starts in ${left(s.start - now)}`;
     aria = `season starts in ${left(s.start - now)}`;
-  } else if (phase === "ended") {
+  } else if (over(phase)) {
     time = "Season ended";
     label = "final";
     aria = "season ended";
@@ -231,8 +275,8 @@ function boardRows(kind: "points" | "invites", limit: number, pinMe: boolean) {
 
 function home() {
   const s = ui.season;
-  const until = s ? (s.phase === "upcoming" ? `Starts in` : "Season ends in") : "";
-  const t = s ? (s.phase === "upcoming" ? left(s.start - clock()) : s.phase === "ended" ? "Ended" : left(s.end - clock())) : "";
+  const until = s ? (s.phase === "upcoming" ? `Starts in` : over(s.phase) ? "Season One" : "Season ends in") : "";
+  const t = s ? (s.phase === "upcoming" ? left(s.start - clock()) : over(s.phase) ? "Ended" : left(s.end - clock())) : "";
   const treasury = s?.treasury
     ? s.explorer
       ? `<a href="${esc(`${s.explorer}/address/${s.treasury}`)}" target="_blank" rel="noopener">public 2-of-3 treasury</a>`
@@ -302,10 +346,11 @@ function heroTab() {
         : r.appeal?.status === "rejected" ? alertBox("error", "Appeal not accepted.", r.appeal.answer ?? "")
         : `<button class="btn btn-secondary" data-act="dispute" data-mut>Dispute</button>`}`
     : r.appeal?.status === "accepted" ? alertBox("ok", "Appeal accepted.", "Your account is back in the tables with all points.") : "";
+  const prize = prizeBanner(s.prize as Prize | null);
   const first = s.hero.wave === 0;
   const phase = s.season.phase;
   const away = first
-    ? `<p class="away-wave mono">Wave 0</p><p>${phase === "upcoming" ? `Your hero starts fighting when the season opens, ${fmtDayShort(s.season.start)} 00:00 UTC.` : "Your hero is fighting now. Come back later for loot."}</p>`
+    ? `<p class="away-wave mono">Wave 0</p><p>${phase === "upcoming" ? `Your hero starts fighting when the season opens, ${fmtDayShort(s.season.start)} 00:00 UTC.` : over(phase) ? "The season is over. Your hero rests until the next one." : "Your hero is fighting now. Come back later for loot."}</p>`
     : `<p class="label">Wave</p><p class="away-wave mono">${num(s.hero.wave)}</p>
        <div class="away-line"><p>Your hero cleared <span class="mono">${num(s.away.waves)}</span> waves while you were away</p><span class="gain">+${num(s.away.points)}</span></div>
        ${s.hero.resting ? `<p class="small">Your hero rests 8 hours after your last visit. Visiting wakes them up.</p>` : ""}
@@ -313,7 +358,7 @@ function heroTab() {
   const st = Math.min(7, s.streak.value);
   const g = s.guarantee;
   const dailyBtn = phase === "upcoming" ? `<button class="btn" disabled>Opens when the season starts</button>`
-    : phase === "ended" ? `<button class="btn" disabled>Season ended</button>`
+    : over(phase) ? `<button class="btn" disabled>Season ended</button>`
     : !s.today.commit ? `<button class="btn" disabled>Chests open after today's seal is published.</button>`
     : s.chests.dailyOpen ? `<button class="btn" disabled>Next chest in <span class="mono" data-clock="next">${left(s.chests.nextDailyAt - clock())}</span></button>`
     : `<button class="btn btn-primary" data-act="open" data-kind="daily" data-mut>Open daily chest</button>`;
@@ -325,7 +370,7 @@ function heroTab() {
       ${above ? `<div class="lb-row"><span class="lb-rank mono">${above.rank}</span><span class="lb-name"><span class="n">${esc(above.name)}</span>${founderChip(above.founder)}</span><span class="lb-pts mono">${num(above.points)}</span></div>` : ""}
       <div class="lb-row lb-me"><span class="lb-rank mono">${b.me.rank}</span><span class="lb-name"><span class="n">${esc(b.me.name)}</span>${founderChip(b.me.founder)}</span><span class="lb-pts mono">${num(b.me.points)}</span></div></section>`;
   })();
-  return `${review}
+  return `${review}${prize}
     <section class="panel" aria-label="While you were away">${away}</section>
     ${s.chests.waiting.length ? alertBox("ok", "A rare chest is waiting.", "Open it on the Chests tab.") : ""}
     <section class="section">
@@ -373,7 +418,10 @@ function seasonTab() {
   const k = ui.boardKind;
   const sz = ui.season;
   const phase = s?.season.phase ?? sz?.phase;
-  const ended = phase === "ended" ? alertBox("info", "Season ended.", `Checking winners until ${fmtDayShort((sz?.end ?? 0) + 7 * DAY)}.`) : "";
+  const ended = phase === "ended" ? alertBox("info", "Season ended.", `Checking winners until ${fmtDayShort((sz?.end ?? 0) + 7 * DAY)}.`)
+    : phase === "published" ? `${alertBox("info", "Winners published.", `Objections until ${fmtDayShort(sz!.objectionsUntil!)}.`)}<a class="btn btn-secondary" href="#/winners">See winners</a>`
+    : phase === "paid" ? `${alertBox("ok", "Prizes paid.", "Every winner has a transaction link.")}<a class="btn btn-secondary" href="#/winners">See winners</a>`
+    : "";
   return `${ended}
     <div class="row-actions" role="group" aria-label="Table">
       <button class="btn ${k === "points" ? "btn-primary" : "btn-secondary"}" data-act="board" data-kind="points" aria-pressed="${k === "points"}">Points</button>
@@ -415,7 +463,7 @@ function friendsTab() {
     <section class="section"><div class="head"><h2 class="title">Founder badge</h2>${founderChip(s.player.founder)}</div>
       ${s.player.founder ? `<p class="small">You have the Founder badge. It shows next to your name in the table, the live feed and on share cards.</p>`
         : `<div class="meter"><div class="bar" role="progressbar" aria-valuemin="0" aria-valuemax="${FOUNDER_DAYS}" aria-valuenow="${s.player.founderDays}" aria-label="Founder badge"><i style="width:${(s.player.founderDays / FOUNDER_DAYS) * 100}%"></i></div><span class="mono">Founder: ${s.player.founderDays} / 3 active days</span></div>
-           <p class="small" style="margin-top:6px">${s.season.phase === "ended" ? "The Founder badge was given during Season One only." : `Play ${3 - s.player.founderDays} more day${3 - s.player.founderDays === 1 ? "" : "s"} this season to get the Founder badge.`}</p>`}
+           <p class="small" style="margin-top:6px">${over(s.season.phase) ? "The Founder badge was given during Season One only." : `Play ${3 - s.player.founderDays} more day${3 - s.player.founderDays === 1 ? "" : "s"} this season to get the Founder badge.`}</p>`}
     </section>`;
 }
 
@@ -641,14 +689,131 @@ function slotSheet(slot: string) {
     : `<div class="empty"><b>Nothing here yet.</b><p class="small">Chests and wave finds fill this slot.</p></div>`}`);
 }
 
-function disputeSheet(err = "") {
-  openSheet(`<div class="sheet-head"><h2 class="title">Dispute</h2><button class="close" data-act="close" aria-label="Close">×</button></div>
-    <form class="stack" data-form="appeal">
+function disputeSheet(err = "", kind: "appeal" | "objection" = "appeal") {
+  openSheet(`<div class="sheet-head"><h2 class="title">${kind === "appeal" ? "Dispute" : "Object to the list"}</h2><button class="close" data-act="close" aria-label="Close">×</button></div>
+    <form class="stack" data-form="appeal" data-kind="${kind}">
       <label class="field"><span>Email for our answer</span><input class="input" name="email" type="email" required autocomplete="email"></label>
       <label class="field"><span>What should we know?</span><textarea class="input" name="text" required minlength="10" maxlength="2000"></textarea></label>
       ${err ? `<p class="field-error" role="alert">${esc(err)}</p>` : ""}
-      <button class="btn btn-primary" data-mut>Send appeal</button>
+      <button class="btn btn-primary" data-mut>${kind === "appeal" ? "Send appeal" : "Send objection"}</button>
     </form>`);
+}
+
+function prizeBanner(p: Prize | null) {
+  if (!p) return "";
+  if (p.status === "excluded") return alertBox("error", "Not on the winners list.", p.reason ?? "");
+  if (p.status === "expired") return alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`);
+  if (p.status === "moved") return "";
+  const line = p.status === "waiting" ? `Confirm your country and payout address by ${fmtDay(p.deadline)}.`
+    : p.status === "paid" ? "Paid. You can transfer it now." : "Confirmed. Payout comes on one day for all winners.";
+  return `<section class="panel"><div class="head"><h2 class="title">You won a prize</h2><span class="label">${esc(boardName(p.board))} · ${p.place}</span></div>
+    <p class="clock">${usd(p.prize)}<span class="small">${eth(p.eth)}</span></p><p class="small" style="margin:6px 0 12px">${esc(line)}</p>
+    <a class="btn btn-primary" href="#/prize">Open prize</a></section>`;
+}
+
+function prizeScreen() {
+  const p = ui.state?.prize as Prize | null;
+  const back = `<a class="ghost back" href="#/hero">Back</a>`;
+  if (!p) return `<main class="read">${back}<h1>Your prize</h1><p>No prize this season.</p></main>`;
+  const head = `${back}<h1>Your prize</h1>
+    <p class="clock">${usd(p.prize)}<span class="small">${eth(p.eth)}</span></p>
+    <p class="small">${cap(boardName(p.board))}, place ${p.place}. Paid in ETH on Robinhood Chain at the rate of the payout day.</p>`;
+  if (p.status === "excluded") return `<main class="read">${head}${alertBox("error", "Not on the winners list.", p.reason ?? "")}${objectButton()}</main>`;
+  if (p.status === "expired") return `<main class="read">${head}${alertBox("warning", "Your prize passed to the next player.", `It was not confirmed by ${fmtDay(p.deadline)}.`)}</main>`;
+  if (p.status === "waiting") {
+    return `<main class="read">${head}
+      <p>Confirm by <b>${fmtDay(p.deadline)}, ${new Date(p.deadline).toISOString().slice(11, 16)} UTC</b>. Without it, the prize goes to the next player.</p>
+      ${p.wallet ? `<form class="stack" data-form="confirm">
+        <label class="field"><span>Country you live in</span><input class="input" name="country" required autocomplete="country-name" maxlength="64"></label>
+        <label class="field"><span>Payout address</span><input class="input mono" name="address" required value="${esc(p.wallet)}" autocomplete="off" spellcheck="false"></label>
+        <p class="small">It must accept ETH on Robinhood Chain. Your sign-in wallet is filled in; the prize then lands there and you can transfer it.</p>
+        <p class="small">Your wallet signs the country and address. It is free and sends no transaction.</p>
+        <div id="confirm-msg"></div>
+        <button class="btn btn-primary" data-mut>Sign and confirm</button></form>`
+      : alertBox("warning", "Sign in with a wallet to confirm.", "Your account has no wallet to sign with. Write to the team through Dispute.")}
+    </main>`;
+  }
+  const tx = p.txHash ? explorerLink("tx", p.txHash) : null;
+  return `<main class="read">${head}
+    ${p.status === "paid" ? alertBox("ok", "Paid.", "The prize is in your payout address.") : alertBox("ok", "Confirmed.", `Payout on one day for all winners, no later than ${fmtDay(ui.season!.payBy)}.`)}
+    <div class="rc-lines"><div class="rc-line"><span class="muted">Country</span>&nbsp;${esc(p.country)}</div>
+      <div class="rc-line"><span class="muted">Payout address</span>&nbsp;${esc(short(p.address ?? ""))}<button class="copy dark" data-act="copy" data-text="${esc(p.address)}" aria-label="Copy payout address"></button></div>
+      ${p.txHash ? `<div class="rc-line"><span class="muted">Transaction</span>&nbsp;${tx ? `<a href="${esc(tx)}" target="_blank" rel="noopener">${short(p.txHash)}</a>` : short(p.txHash)}</div>` : ""}</div>
+    ${p.status === "paid" && p.address && p.wallet && p.address.toLowerCase() === p.wallet.toLowerCase() ? `<button class="btn btn-primary" data-act="transfer" data-mut>Transfer</button>` : ""}
+  </main>`;
+}
+
+function objectButton() {
+  const s = ui.season;
+  return s?.objectionsUntil && clock() < s.objectionsUntil && ui.session ? `<button class="btn btn-secondary" data-act="object" data-mut>Object to the list</button>` : "";
+}
+
+function winnersScreen() {
+  const list = winnersList;
+  const s = ui.season;
+  const group = (b: "points" | "invites") => {
+    const rows = (list ?? []).filter((w) => w.board === b);
+    if (!rows.length) return `<p class="small">No winners in the ${boardName(b)}.</p>`;
+    return rows.map((w) => {
+      const tx = w.txHash ? explorerLink("tx", w.txHash) : null;
+      return `<div class="lb-row"><span class="lb-rank mono">${w.place}</span><span class="lb-name"><span class="n">${esc(w.name)}</span></span><span class="lb-pts mono">${usd(w.prize)}${w.txHash ? ` · ${tx ? `<a href="${esc(tx)}" target="_blank" rel="noopener">tx</a>` : "paid"}` : ""}</span></div>`;
+    }).join("");
+  };
+  return `<main class="read">
+    <a class="ghost back" href="#/season">Back</a>
+    <h1>Winners</h1>
+    ${list === null ? `<p>The list is published after the team checks every winner.</p>` : `
+      ${s?.objectionsUntil && clock() < s.objectionsUntil ? `<p>Objections until <b>${fmtDay(s.objectionsUntil)}</b>. Every objection is answered before payout.</p>${objectButton()}` : ""}
+      <h2>Points race</h2>${group("points")}<h2>Invite race</h2>${group("invites")}
+      ${s?.ethRate ? `<p class="small">ETH rate of the payout day: ${usd(s.ethRate)} per ETH.</p>` : ""}`}
+  </main>`;
+}
+let winnersList: { board: string; place: number; prize: number; name: string; txHash: string | null; eth: number | null }[] | null = null;
+
+async function transferSheet() {
+  const s = ui.season!;
+  const exchanges = s.exchanges.length
+    ? `<ul>${s.exchanges.map((x) => `<li>${x.url ? `<a href="${esc(x.url)}" target="_blank" rel="noopener">${esc(x.name)}</a>` : esc(x.name)}</li>`).join("")}</ul>`
+    : `<p class="small">The list of exchanges that take ETH on Robinhood Chain is published here before payouts.</p>`;
+  openSheet(`<div class="sheet-head"><h2 class="title">Transfer ETH</h2><button class="close" data-act="close" aria-label="Close">×</button></div>
+    <ol class="stack small" style="padding-left:20px">
+      <li>On your exchange, open the deposit page for ETH and pick the Robinhood Chain network.</li>
+      <li>Copy the deposit address and paste it below. Check the first and last characters.</li>
+      <li>Send. Selling ETH for money happens on the exchange, not in the game.</li>
+    </ol>
+    <p class="label">Exchanges that take ETH on Robinhood Chain</p>${exchanges}
+    <form class="stack" data-form="transfer">
+      <label class="field"><span>Address to send to</span><input class="input mono" name="to" required autocomplete="off" spellcheck="false" placeholder="0x…"></label>
+      <p class="small">It must accept ETH on Robinhood Chain. ETH sent to a wrong network can be lost.</p>
+      <div id="transfer-amount" class="rc-lines"><span class="skel" style="width:60%"></span></div>
+      <p><b>This transfer cannot be undone.</b> Check the address before you send.</p>
+      <div id="transfer-msg" aria-live="polite"></div>
+      <button class="btn btn-primary" id="transfer-send" disabled data-mut>Send</button>
+    </form>`);
+  try {
+    const t = await transferQuote();
+    document.getElementById("transfer-amount")!.innerHTML = `<div class="rc-line" style="color:var(--text)"><span class="muted">In your wallet</span>&nbsp;${formatEth(t.balance)} ETH</div>
+      <div class="rc-line" style="color:var(--text)"><span class="muted">Network fee</span>&nbsp;${formatEth(t.fee, 8)} ETH</div>
+      <div class="rc-line" style="color:var(--text)"><span class="muted">You send</span>&nbsp;<b>${formatEth(t.value)} ETH</b></div>`;
+    const btn = document.getElementById("transfer-send") as HTMLButtonElement;
+    btn.textContent = `Send ${formatEth(t.value)} ETH`;
+    btn.disabled = t.value === 0n;
+    if (t.value === 0n) document.getElementById("transfer-msg")!.innerHTML = alertBox("warning", "Not enough ETH to pay the network fee.");
+  } catch (e: any) {
+    document.getElementById("transfer-amount")!.innerHTML = alertBox("error", "Transfer not ready.", e?.message ?? "");
+  }
+}
+
+// Whole balance minus the exact fee of a plain transfer at a fixed gas price.
+async function transferQuote() {
+  const w = await wallet();
+  const chainId = ui.season!.chainId;
+  if (!chainId) throw new Error("Transfers open once the game's network is set.");
+  if (Number(await w.request({ method: "eth_chainId" })) !== chainId) throw new Error("Switch your wallet to Robinhood Chain.");
+  const [from] = await w.request({ method: "eth_requestAccounts" });
+  const balance = BigInt(await w.request({ method: "eth_getBalance", params: [from, "latest"] }));
+  const gasPrice = BigInt(await w.request({ method: "eth_gasPrice" }));
+  return { w, from: from as string, balance, gasPrice, ...amountAfterGas(balance, gasPrice) };
 }
 
 // ---------- render
@@ -656,9 +821,9 @@ function disputeSheet(err = "") {
 function render() {
   const r = route();
   const offlineBanner = offline ? alertBox("warning", `Offline. Showing data from ${lastOk ? new Date(lastOk).toTimeString().slice(0, 5) : "earlier"}.`, "Actions wait until you are back online.") : "";
-  if (["rules", "odds", "prizes", "fair", "receipt"].includes(r.name)) {
-    const screen = { rules: rulesScreen, odds: oddsScreen, prizes: prizesScreen, fair: fairScreen, receipt: receiptScreen }[r.name as "rules"]!;
-    $app.innerHTML = `${ui.session && ui.state ? bar() : ""}${offlineBanner}${ui.error ? `<div class="read" style="padding-bottom:0">${alertBox("error", ui.error)}</div>` : ""}${screen()}`;
+  if (["rules", "odds", "prizes", "fair", "receipt", "prize", "winners"].includes(r.name)) {
+    const screen = { rules: rulesScreen, odds: oddsScreen, prizes: prizesScreen, fair: fairScreen, receipt: receiptScreen, prize: prizeScreen, winners: winnersScreen }[r.name as "rules"]!;
+    $app.innerHTML = `${ui.session && ui.state ? bar() : ""}${offlineBanner}${ui.error || notice ? `<div class="read" style="padding-bottom:0">${ui.error ? alertBox("error", ui.error) : notice}</div>` : ""}${screen()}`;
     return;
   }
   if (!ui.session) {
@@ -679,7 +844,7 @@ function render() {
   $app.innerHTML = `<div class="shell">
     <header class="deskhead"><span class="brand">Season One</span>${tabs("desk-tabs")}${bar()}</header>
     <div class="phone-bar">${bar().replace('class="seasonbar"', 'class="seasonbar phone"')}</div>
-    <div class="desk-main"><main class="main" id="main">${offlineBanner}${ui.error ? alertBox("error", ui.error) : ""}${body}</main>${side}</div>
+    <div class="desk-main"><main class="main" id="main">${offlineBanner}${ui.error ? alertBox("error", ui.error) : notice}${body}</main>${side}</div>
     ${tabs("tabbar")}
   </div>`;
   if (ui.opening && !ui.opening.played) requestAnimationFrame(playReel);
@@ -723,10 +888,20 @@ async function loadRolls() {
 }
 
 async function refreshAll() {
-  const jobs: Promise<unknown>[] = [loadBoard("points"), loadFeed()];
+  const jobs: Promise<unknown>[] = [loadBoard("points"), loadFeed(), loadSeason()];
   if (ui.session && !ui.session.needsName) jobs.push(loadState().catch(showError), api("/api/announcements").then((a) => (ui.announcements = a)));
   await Promise.allSettled(jobs);
   render();
+}
+
+let notice = "";
+function showDone(strong: string, text: string) {
+  notice = alertBox("ok", strong, text);
+  say(strong);
+  setTimeout(() => {
+    notice = "";
+    render();
+  }, 6000);
 }
 
 function showError(e: unknown) {
@@ -770,13 +945,9 @@ setInterval(() => {
 // ---------- actions
 
 async function signInWallet() {
-  const eth = (window as any).ethereum;
   const out = document.getElementById("signin-error")!;
-  if (!eth) {
-    out.innerHTML = alertBox("error", "No wallet found.", "Open this page in a wallet browser or install a wallet extension.");
-    return;
-  }
   try {
+    const eth = await wallet();
     const [address] = await eth.request({ method: "eth_requestAccounts" });
     const { message } = await api("/api/auth/siwe/message", { address });
     const hex = `0x${toHex(new TextEncoder().encode(message))}`;
@@ -876,7 +1047,8 @@ document.addEventListener("click", async (ev) => {
   if (act === "dev") {
     const name = (document.getElementById("dev-name") as HTMLInputElement).value.trim();
     try {
-      const res = await api("/api/auth/dev", { name, accept: true, device });
+      const mockAddr = ui.season?.mockChain ? (await (await mockWallet()).request({ method: "eth_accounts" }))[0] : undefined;
+      const res = await api("/api/auth/dev", { name, accept: true, device, wallet: mockAddr });
       await afterSignIn(res.player);
     } catch (e: any) {
       document.getElementById("signin-error")!.innerHTML = alertBox("error", "Not signed in.", e.message);
@@ -894,6 +1066,8 @@ document.addEventListener("click", async (ev) => {
   if (act === "copy") return copy(el);
   if (act === "slot") return slotSheet(el.dataset.slot!);
   if (act === "dispute") return disputeSheet();
+  if (act === "object") return disputeSheet("", "objection");
+  if (act === "transfer") return transferSheet();
   if (act === "board") {
     ui.boardKind = el.dataset.kind as "points";
     if (!ui.board[ui.boardKind]) await loadBoard(ui.boardKind).catch(showError);
@@ -971,12 +1145,55 @@ document.addEventListener("submit", async (ev) => {
   }
   if (f.dataset.form === "appeal") {
     try {
-      await api("/api/appeal", { email: data.email, text: data.text });
+      const kind = f.dataset.kind === "objection" ? "objection" : "appeal";
+      await api("/api/appeal", { email: data.email, text: data.text, kind });
       closeSheet();
+      if (kind === "objection") showDone("Objection sent.", "The team answers before any payout.");
       await loadState();
       render();
     } catch (e: any) {
-      disputeSheet(e.message);
+      disputeSheet(e.message, f.dataset.kind === "objection" ? "objection" : "appeal");
+    }
+  }
+  if (f.dataset.form === "confirm") {
+    const msg = document.getElementById("confirm-msg")!;
+    const p = ui.state.prize as Prize;
+    try {
+      const country = data.country!.trim(), address = data.address!.trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(address)) throw new Error("That payout address is not valid.");
+      const { getAddress } = await import("viem");
+      const message = payoutMessage({ seasonId: p.seasonId, playerId: p.playerId, name: p.name, country, address: getAddress(address) });
+      const w = await wallet();
+      const [from] = await w.request({ method: "eth_requestAccounts" });
+      if (from.toLowerCase() !== p.wallet!.toLowerCase()) throw new Error("Switch your wallet to the account you signed in with.");
+      const signature = await w.request({ method: "personal_sign", params: [utf8Hex(message), from] });
+      ui.state.prize = await api("/api/prize/confirm", { country, address, signature });
+      render();
+    } catch (e: any) {
+      msg.innerHTML = alertBox("error", "Not confirmed.", e?.message ?? "");
+    }
+  }
+  if (f.dataset.form === "transfer") {
+    const msg = document.getElementById("transfer-msg")!;
+    const btn = document.getElementById("transfer-send") as HTMLButtonElement;
+    try {
+      const to = data.to!.trim();
+      if (!/^0x[0-9a-fA-F]{40}$/.test(to)) throw new Error("That address is not valid.");
+      btn.disabled = true;
+      btn.textContent = "Sending…";
+      const t = await transferQuote();
+      if (t.value === 0n) throw new Error("Not enough ETH to pay the network fee.");
+      const hash = await t.w.request({
+        method: "eth_sendTransaction",
+        params: [{ from: t.from, to, value: `0x${t.value.toString(16)}`, gas: `0x${TRANSFER_GAS.toString(16)}`, gasPrice: `0x${t.gasPrice.toString(16)}` }],
+      });
+      const link = explorerLink("tx", hash);
+      f.innerHTML = `${alertBox("ok", "Sent.", `${formatEth(t.value)} ETH is on its way.`)}${link ? `<a class="btn btn-secondary" href="${esc(link)}" target="_blank" rel="noopener">See transaction</a>` : `<p class="mono small">${esc(hash)}</p>`}`;
+      say("Sent");
+    } catch (e: any) {
+      msg.innerHTML = alertBox("error", "Transfer failed. Your ETH is still here.", e?.message ?? "");
+      btn.disabled = false;
+      btn.textContent = "Try again";
     }
   }
   if (f.dataset.form === "seed") {
@@ -1014,6 +1231,8 @@ window.addEventListener("hashchange", async () => {
   if (r.name === "chests" && ui.session) await loadRolls().catch(showError);
   if (r.name === "season" && ui.session) await api("/api/announcements").then((a) => (ui.announcements = a)).catch(() => {});
   if (r.name === "fair") fairDays = await api("/api/fair/days").catch(() => null);
+  if (r.name === "winners" || r.name === "prize") await loadSeason().catch(() => {});
+  if (r.name === "winners") winnersList = await api("/api/winners").catch(() => null);
   render();
   window.scrollTo(0, 0);
 });
