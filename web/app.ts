@@ -428,7 +428,7 @@ function seasonTab() {
       <button data-act="board" data-kind="points" aria-pressed="${k === "points"}">Points</button>
       <button data-act="board" data-kind="invites" aria-pressed="${k === "invites"}">Invites</button>
     </div>
-    <p class="small">70% points race · 30% invite race · about 30 prizes · <a href="#/prizes">Prizes</a></p>
+    <div class="head"><p class="small">70% points race · 30% invite race · about 30 prizes</p><a class="ghost" href="#/prizes">Prizes</a></div>
     <section class="panel"><div class="head"><h2 class="title">${k === "points" ? "Points race" : "Invite race"}</h2><span class="label">${ui.board[k] ? `${num(ui.board[k].total)} ${k === "points" ? "players" : "inviters"}` : ""}</span></div>
       ${boardRows(k, 50, true)}
     </section>
