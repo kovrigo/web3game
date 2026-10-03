@@ -57,7 +57,12 @@ export function createApp({ db, env, now = Date.now }: AppOptions) {
     return { name: name!.trim(), url: url?.trim() ?? null };
   });
   const salt = env.IP_SALT ?? "";
-  const origin = (req: Request) => env.PUBLIC_ORIGIN ?? new URL(req.url).origin;
+  // Without PUBLIC_ORIGIN (test sites only) the https proxy in front says the scheme the browser used.
+  const origin = (req: Request) => {
+    if (env.PUBLIC_ORIGIN) return env.PUBLIC_ORIGIN;
+    const u = new URL(req.url);
+    return req.headers.get("x-forwarded-proto") === "https" ? `https://${u.host}` : u.origin;
+  };
   const sidCookie = (req: Request, token: string, maxAge: number) =>
     `sid=${token}; Path=/; HttpOnly; SameSite=Lax; Max-Age=${maxAge}${origin(req).startsWith("https") ? "; Secure" : ""}`;
   let server: Server<unknown> | null = null;
