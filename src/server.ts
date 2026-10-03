@@ -449,7 +449,8 @@ if (import.meta.main) {
   const server = Bun.serve({
     port: Number(env.PORT),
     hostname: env.HOST,
-    development: env.DEV_LOGIN === "1",
+    // Bun's HMR answers 403 to any Host but localhost, so the tailnet test link would be blocked.
+    development: env.DEV_LOGIN === "1" ? { hmr: false } : false,
     maxRequestBodySize: 64 * 1024,
     routes: app.routes,
     fetch: () => Response.json({ error: "Not found." }, { status: 404 }),
