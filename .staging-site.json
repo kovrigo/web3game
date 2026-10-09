@@ -1,0 +1,4 @@
+{
+  "cmd": "bun install --frozen-lockfile && export DEV_LOGIN=1 MOCK_CHAIN=1 EXPLORER_URL=/dev/explorer DB_PATH=data/staging-dev.sqlite SEASON_START=2026-09-29T00:00:00Z ADMIN_TOKENS=team:season-one-dev HOST=127.0.0.1 && { [ -f data/staging-dev.sqlite ] || bun scripts/dev-seed.ts; } && bun src/server.ts",
+  "url_path": "/"
+}
